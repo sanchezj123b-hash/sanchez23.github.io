@@ -18,22 +18,21 @@
         video { width: 100%; height: 100%; object-fit: cover; background: #111; }
         .video-box span { position: absolute; bottom: 5px; left: 5px; background: rgba(0,0,0,0.6); padding: 2px 6px; font-size: 12px; border-radius: 3px; z-index: 10; }
         input[type="text"] { padding: 8px; background: #333; color: white; border: none; border-radius: 4px; }
-        .btn-admitir { background-color: #28a745; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 13px; }
-        .btn-admitir:hover { background-color: #218838; }
+        .estado { font-size: 12px; color: #888; margin-top: 5px; }
     </style>
 </head>
 <body>
 
 <div class="barra-superior">
-    <div>🔒 ID de sala: <strong id="lblSalaID" style="color:#ffc107; font-size:16px;">Cargando...</strong> | ROL: <strong>Anfitrión</strong></div>
-    <div>⏱ Tiempo: <strong id="temporizador" style="color:#ffc107;">30:00</strong></div>
+    <div>🔒 ID de sala: <strong id="lblSalaID" style="color:#ffc107;font-size:16px;">Conectando...</strong> | ROL: <strong>Anfitrión</strong></div>
+    <div>⏱ <strong id="temporizador" style="color:#ffc107;">30:00</strong></div>
     <button style="background:#dc3545;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;" onclick="cerrarSalaForzada()">Finalizar para Todos</button>
 </div>
 
 <div class="sala-espera-contenedor">
     <strong>⏳ Sala de Espera — usuarios esperando aprobación:</strong>
     <div id="contenedorEspera" class="lista-espera">
-        <span style="color:#888; font-size:13px;">Nadie esperando aún...</span>
+        <span style="color:#888;font-size:13px;">Nadie esperando aún...</span>
     </div>
 </div>
 
@@ -44,6 +43,7 @@
             <input type="text" id="txtMensaje" placeholder="Escribe un mensaje..." style="width:100%;">
             <button style="background:#0e71eb;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;" onclick="enviarMensaje()">Enviar</button>
         </div>
+        <div id="estadoConexion" class="estado">⏳ Conectando al servidor...</div>
     </div>
     <div class="seccion-videos">
         <button id="btnCamara" style="background:#28a745;color:white;margin-bottom:15px;padding:8px 16px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;" onclick="controlarCamaraLocal()">Encender Cámara/Audio</button>
@@ -56,156 +56,171 @@
     </div>
 </div>
 
-<!-- Supabase carga primero, luego el script de la app -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
-// =============================================
-//  PEGA AQUÍ TUS CREDENCIALES DE SUPABASE
-// =============================================
-const SUPABASE_URL = "https://TU_PROYECTO.supabase.co";
-const SUPABASE_KEY = "TU_ANON_KEY_AQUI";
-// =============================================
-
-const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
-
-// Leer parámetros — doble decode por si vienen doblemente codificados
 const params   = new URLSearchParams(window.location.search);
 const salaID   = decodeURIComponent(params.get("id")     || "");
 const miNombre = decodeURIComponent(params.get("nombre") || "Anfitrión");
 
 if (!salaID) { window.location.href = "index.html"; }
 
-// Mostrar ID y nombre en pantalla inmediatamente
 document.getElementById("lblSalaID").textContent      = salaID;
 document.getElementById("lblNombreLocal").textContent  = "Tú (Anfitrión) - " + miNombre;
 document.title = "Anfitrión - " + salaID;
 
-let canal          = null;
+// PeerJS usa el salaID como peer ID del anfitrión (limpio, sin caracteres raros)
+const peerIdAnfitrion = "zoomof-" + salaID.replace(/[^a-zA-Z0-9]/g, "-");
+
+let peer           = null;
 let miStream       = null;
-let conexionesPeer = {};
-let enEspera       = [];
+let conexiones     = {};   // { nombre: { conn (DataConnection), call (MediaConnection) } }
+let enEspera       = [];   // [ { nombre, conn } ]
 let segundos       = 30 * 60;
-let timerId        = null;
 
-// ── TEMPORIZADOR (arranca solo, independiente de Supabase) ──
-function arrancarTemporizador() {
-    timerId = setInterval(() => {
-        segundos--;
-        const m = Math.floor(segundos / 60);
-        const s = segundos % 60;
-        document.getElementById("temporizador").innerText =
-            (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
-        if (segundos <= 0) { clearInterval(timerId); cerrarSalaForzada(); }
-    }, 1000);
-}
+// ── TEMPORIZADOR ─────────────────────────────────────────────
+const timerId = setInterval(() => {
+    segundos--;
+    const m = Math.floor(segundos / 60), s = segundos % 60;
+    document.getElementById("temporizador").innerText =
+        (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
+    if (segundos <= 0) { clearInterval(timerId); cerrarSalaForzada(); }
+}, 1000);
 
-// ── INICIAR SUPABASE ────────────────────────────────────────
-function iniciar() {
-    if (!window.supabase) {
-        console.error("❌ Supabase no cargó. Verifica tu conexión a internet.");
-        return;
-    }
+// ── INICIAR PEER ─────────────────────────────────────────────
+window.addEventListener("load", () => {
+    peer = new Peer(peerIdAnfitrion);
 
-    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-    canal = sb.channel("sala:" + salaID, {
-        config: { broadcast: { self: false } }
+    peer.on("open", (id) => {
+        console.log("✅ Anfitrión conectado con ID:", id);
+        document.getElementById("estadoConexion").innerText = "✅ Conectado. Esperando participantes...";
+        document.getElementById("estadoConexion").style.color = "#28a745";
     });
 
-    canal
-        .on("broadcast", { event: "señal" }, ({ payload }) => manejarSenal(payload))
-        .subscribe((status) => {
-            console.log("Canal estado:", status);
+    peer.on("error", (err) => {
+        console.error("Error PeerJS:", err);
+        if (err.type === "unavailable-id") {
+            document.getElementById("estadoConexion").innerText = "⚠️ Ya hay una sala con este ID activa.";
+        } else {
+            document.getElementById("estadoConexion").innerText = "❌ Error: " + err.message;
+        }
+        document.getElementById("estadoConexion").style.color = "#dc3545";
+    });
+
+    // Participante se conecta por DataConnection (señalización/chat)
+    peer.on("connection", (conn) => {
+        const nombre = decodeURIComponent(conn.metadata.nombre || conn.peer);
+        console.log("📨 Conexión de datos de:", nombre);
+
+        conn.on("open", () => {
+            // Avisar que llegó alguien a espera
+            agregarAListaEspera(nombre, conn);
         });
 
-    document.getElementById("txtMensaje").addEventListener("keypress", e => {
-        if (e.key === "Enter") enviarMensaje();
+        conn.on("data", (data) => {
+            manejarDatos(nombre, data);
+        });
+
+        conn.on("close", () => {
+            destruirConexion(nombre);
+        });
     });
-}
 
-// ── ENVIAR SEÑAL ────────────────────────────────────────────
-function enviarSenal(payload) {
-    if (canal) canal.send({ type: "broadcast", event: "señal", payload });
-}
+    // Participante llama con video
+    peer.on("call", (call) => {
+        const nombre = decodeURIComponent(call.metadata.nombre || call.peer);
+        console.log("📹 Llamada de video de:", nombre);
 
-// ── MANEJAR SEÑALES ─────────────────────────────────────────
-function manejarSenal(data) {
+        // Solo contestar si fue admitido
+        if (conexiones[nombre] && conexiones[nombre].admitido) {
+            call.answer(miStream || null);
+            call.on("stream", (stream) => {
+                crearBox(nombre);
+                const v = document.getElementById("video-" + nombre);
+                if (v) v.srcObject = stream;
+            });
+            conexiones[nombre].call = call;
+        } else {
+            // Guardar la llamada hasta que sea admitido
+            if (!conexiones[nombre]) conexiones[nombre] = {};
+            conexiones[nombre].pendingCall = call;
+        }
+    });
+});
+
+// ── MANEJAR DATOS (chat + señales) ───────────────────────────
+function manejarDatos(nombre, data) {
     if (!data || !data.tipo) return;
-    const remoto = data.nombre;
-    if (!remoto || remoto === miNombre) return;
-
-    console.log("Señal recibida:", data.tipo, "de:", remoto);
-
     switch (data.tipo) {
-        case "solicitar_entrada":
-            agregarAListaEspera(remoto);
-            break;
         case "mensaje":
-            mostrarMensaje(remoto, data.mensaje);
+            mostrarMensaje(nombre, data.mensaje);
             break;
         case "camara_apagada": {
-            const v = document.getElementById("video-" + remoto);
+            const v = document.getElementById("video-" + nombre);
             if (v) v.srcObject = null;
             break;
         }
-        case "offer":
-            if (data.destinatario === miNombre) recibirOffer(remoto, data.sdp);
-            break;
-        case "answer":
-            if (data.destinatario === miNombre && conexionesPeer[remoto])
-                conexionesPeer[remoto].setRemoteDescription(new RTCSessionDescription(data.sdp));
-            break;
-        case "candidate":
-            if (data.destinatario === miNombre && conexionesPeer[remoto])
-                conexionesPeer[remoto].addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {});
-            break;
     }
 }
 
-// ── SALA DE ESPERA ──────────────────────────────────────────
-function agregarAListaEspera(nombre) {
-    if (!nombre || nombre === miNombre) return;
-    if (enEspera.some(u => u.toLowerCase() === nombre.toLowerCase())) return;
-    enEspera.push(nombre);
+// ── SALA DE ESPERA ────────────────────────────────────────────
+function agregarAListaEspera(nombre, conn) {
+    if (enEspera.some(u => u.nombre === nombre)) return;
+    if (!conexiones[nombre]) conexiones[nombre] = {};
+    conexiones[nombre].conn = conn;
+    conexiones[nombre].admitido = false;
+    enEspera.push({ nombre, conn });
     renderizarEspera();
 }
 
 function renderizarEspera() {
     const c = document.getElementById("contenedorEspera");
     c.innerHTML = "";
-
     if (enEspera.length === 0) {
         c.innerHTML = '<span style="color:#888;font-size:13px;">Nadie esperando aún...</span>';
         return;
     }
-
-    enEspera.forEach(user => {
+    enEspera.forEach(u => {
         const div = document.createElement("div");
         div.className = "tarjeta-espera";
-
         const span = document.createElement("span");
-        span.innerHTML = "👤 <strong>" + user + "</strong>";
-
+        span.innerHTML = "👤 <strong>" + u.nombre + "</strong>";
         const btn = document.createElement("button");
-        btn.className = "btn-admitir";
         btn.textContent = "✅ Admitir";
-        btn.onclick = function() { admitirUsuario(user); };
-
+        btn.style = "background:#28a745;color:white;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;font-weight:bold;";
+        btn.onclick = function() { admitirUsuario(u.nombre); };
         div.appendChild(span);
         div.appendChild(btn);
         c.appendChild(div);
     });
 }
 
-function admitirUsuario(user) {
-    enviarSenal({ tipo: "entrada_aprobada", nombre: miNombre, destinatario: user });
-    enEspera = enEspera.filter(u => u !== user);
+function admitirUsuario(nombre) {
+    if (!conexiones[nombre]) return;
+    conexiones[nombre].admitido = true;
+
+    // Decirle al participante que fue admitido
+    if (conexiones[nombre].conn) {
+        conexiones[nombre].conn.send({ tipo: "entrada_aprobada" });
+    }
+
+    enEspera = enEspera.filter(u => u.nombre !== nombre);
     renderizarEspera();
-    crearBox(user);
-    setTimeout(() => iniciarConexion(user), 600);
+    crearBox(nombre);
+
+    // Si ya había una llamada de video pendiente, contestarla ahora
+    if (conexiones[nombre].pendingCall) {
+        const call = conexiones[nombre].pendingCall;
+        call.answer(miStream || null);
+        call.on("stream", (stream) => {
+            const v = document.getElementById("video-" + nombre);
+            if (v) v.srcObject = stream;
+        });
+        conexiones[nombre].call = call;
+        delete conexiones[nombre].pendingCall;
+    }
 }
 
-// ── CAJAS DE VIDEO ──────────────────────────────────────────
+// ── CAJAS DE VIDEO ────────────────────────────────────────────
 function crearBox(nombre) {
     if (document.getElementById("box-" + nombre)) return;
     const box = document.createElement("div");
@@ -217,7 +232,18 @@ function crearBox(nombre) {
     document.getElementById("salaVideos").appendChild(box);
 }
 
-// ── CÁMARA ──────────────────────────────────────────────────
+function destruirConexion(nombre) {
+    if (conexiones[nombre]) {
+        if (conexiones[nombre].call) conexiones[nombre].call.close();
+        delete conexiones[nombre];
+    }
+    const el = document.getElementById("box-" + nombre);
+    if (el) el.remove();
+    enEspera = enEspera.filter(u => u.nombre !== nombre);
+    renderizarEspera();
+}
+
+// ── CÁMARA ────────────────────────────────────────────────────
 function controlarCamaraLocal() {
     const btn = document.getElementById("btnCamara");
     if (miStream) {
@@ -225,10 +251,7 @@ function controlarCamaraLocal() {
         miStream = null;
         document.getElementById("localVideo").srcObject = null;
         btn.innerText = "Encender Cámara/Audio"; btn.style.background = "#28a745";
-        Object.values(conexionesPeer).forEach(pc => {
-            pc.getSenders().forEach(s => { if (s.track) pc.removeTrack(s); });
-        });
-        enviarSenal({ tipo: "camara_apagada", nombre: miNombre, destinatario: "" });
+        enviarATodos({ tipo: "camara_apagada" });
     } else {
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then(stream => {
@@ -236,68 +259,23 @@ function controlarCamaraLocal() {
                 const lv = document.getElementById("localVideo");
                 lv.srcObject = stream; lv.style.transform = "scaleX(-1)";
                 btn.innerText = "Apagar Cámara/Audio"; btn.style.background = "#dc3545";
-                Object.entries(conexionesPeer).forEach(([remoto, pc]) => {
-                    if (pc.signalingState !== "closed") {
-                        stream.getTracks().forEach(t => {
-                            if (!pc.getSenders().some(s => s.track && s.track.kind === t.kind))
-                                pc.addTrack(t, stream);
-                        });
-                    }
-                });
             })
-            .catch(() => alert("Verifica los permisos de cámara en el navegador."));
+            .catch(() => alert("Verifica los permisos de cámara."));
     }
 }
 
-// ── WebRTC ──────────────────────────────────────────────────
-function iniciarConexion(remoto) {
-    if (conexionesPeer[remoto]) return;
-    const pc = new RTCPeerConnection(rtcConfig);
-    conexionesPeer[remoto] = pc;
-    if (miStream) miStream.getTracks().forEach(t => pc.addTrack(t, miStream));
-    pc.onicecandidate = e => {
-        if (e.candidate)
-            enviarSenal({ tipo: "candidate", nombre: miNombre, destinatario: remoto, candidate: e.candidate });
-    };
-    pc.ontrack = e => {
-        const v = document.getElementById("video-" + remoto);
-        if (v) v.srcObject = e.streams[0];
-    };
-    pc.createOffer()
-        .then(o => pc.setLocalDescription(o))
-        .then(() => enviarSenal({ tipo: "offer", nombre: miNombre, destinatario: remoto, sdp: pc.localDescription }))
-        .catch(e => console.error("Error offer:", e));
+// ── CHAT ──────────────────────────────────────────────────────
+function enviarATodos(data) {
+    Object.values(conexiones).forEach(c => {
+        if (c.conn && c.conn.open && c.admitido) c.conn.send(data);
+    });
 }
 
-function recibirOffer(remoto, sdp) {
-    crearBox(remoto);
-    if (!conexionesPeer[remoto]) {
-        const pc = new RTCPeerConnection(rtcConfig);
-        conexionesPeer[remoto] = pc;
-        if (miStream) miStream.getTracks().forEach(t => pc.addTrack(t, miStream));
-        pc.onicecandidate = e => {
-            if (e.candidate)
-                enviarSenal({ tipo: "candidate", nombre: miNombre, destinatario: remoto, candidate: e.candidate });
-        };
-        pc.ontrack = e => {
-            const v = document.getElementById("video-" + remoto);
-            if (v) v.srcObject = e.streams[0];
-        };
-    }
-    const pc = conexionesPeer[remoto];
-    pc.setRemoteDescription(new RTCSessionDescription(sdp))
-        .then(() => pc.createAnswer())
-        .then(a => pc.setLocalDescription(a))
-        .then(() => enviarSenal({ tipo: "answer", nombre: miNombre, destinatario: remoto, sdp: pc.localDescription }))
-        .catch(e => console.error("Error answer:", e));
-}
-
-// ── CHAT ────────────────────────────────────────────────────
 function enviarMensaje() {
     const txt = document.getElementById("txtMensaje");
     const texto = txt.value.trim();
     if (!texto) return;
-    enviarSenal({ tipo: "mensaje", nombre: miNombre, destinatario: "", mensaje: texto });
+    enviarATodos({ tipo: "mensaje", nombre: miNombre, mensaje: texto });
     mostrarMensaje(miNombre, texto);
     txt.value = ""; txt.focus();
 }
@@ -313,15 +291,14 @@ function mostrarMensaje(nombre, texto) {
     c.appendChild(p); c.scrollTop = c.scrollHeight;
 }
 
-// ── CERRAR SALA ──────────────────────────────────────────────
+// ── CERRAR SALA ───────────────────────────────────────────────
 function cerrarSalaForzada() {
-    enviarSenal({ tipo: "sala_cerrada", nombre: miNombre, destinatario: "" });
-    setTimeout(() => { window.location.href = "index.html"; }, 400);
+    enviarATodos({ tipo: "sala_cerrada" });
+    setTimeout(() => {
+        if (peer) peer.destroy();
+        window.location.href = "index.html";
+    }, 400);
 }
-
-// ── ARRANCAR TODO ────────────────────────────────────────────
-arrancarTemporizador();   // Temporizador corre desde el primer segundo
-window.addEventListener("load", iniciar);  // Supabase arranca cuando la página cargó del todo
 </script>
 </body>
 </html>
