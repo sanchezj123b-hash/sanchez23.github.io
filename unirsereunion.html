@@ -193,32 +193,67 @@ function crearBox(nombre) {
 // ── CÁMARA ────────────────────────────────────────────────────
 function controlarCamaraLocal() {
     const btn = document.getElementById("btnCamara");
-    if (miStream) {
-        miStream.getTracks().forEach(t => t.stop());
-        miStream = null;
-        document.getElementById("localVideo").srcObject = null;
-        btn.innerText = "Encender Cámara/Audio"; btn.style.background = "#28a745";
-        if (connData && connData.open) connData.send({ tipo: "camara_apagada" });
-    } else {
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-            .then(stream => {
-                miStream = stream;
-                const lv = document.getElementById("localVideo");
-                lv.srcObject = stream; lv.style.transform = "scaleX(-1)";
-                btn.innerText = "Apagar Cámara/Audio"; btn.style.background = "#dc3545";
-                // Si ya hay una llamada activa, reemplazar el stream
-                if (callVid) {
-                    stream.getTracks().forEach(t => {
-                        const sender = callVid.peerConnection.getSenders()
-                            .find(s => s.track && s.track.kind === t.kind);
-                        if (sender) sender.replaceTrack(t);
-                    });
-                }
-            })
-            .catch(() => alert("Verifica los permisos de cámara."));
-    }
-}
 
+    if (miStream) {
+        miStream.getTracks().forEach(track => track.stop());
+
+        miStream = null;
+
+        document.getElementById("localVideo").srcObject = null;
+
+        btn.innerText = "Encender Cámara/Audio";
+        btn.style.background = "#28a745";
+
+        if (connData && connData.open) {
+            connData.send({ tipo: "camara_apagada" });
+        }
+
+        return;
+    }
+
+    navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+    })
+    .then(stream => {
+
+        miStream = stream;
+
+        const lv = document.getElementById("localVideo");
+        lv.srcObject = stream;
+        lv.style.transform = "scaleX(-1)";
+
+        btn.innerText = "Apagar Cámara/Audio";
+        btn.style.background = "#dc3545";
+
+        if (callVid) {
+            callVid.close();
+        }
+
+        callVid = peer.call(peerIdAnfitrion, miStream, {
+            metadata: {
+                nombre: miNombre
+            }
+        });
+
+        callVid.on("stream", remoteStream => {
+
+            crearBox("anfitrion");
+
+            const videoHost =
+                document.getElementById("video-anfitrion");
+
+            if (videoHost) {
+                videoHost.srcObject = remoteStream;
+            }
+        });
+
+    })
+    .catch(err => {
+        console.error(err);
+        alert("No se pudo acceder a la cámara.");
+    });
+}
 // ── CHAT ──────────────────────────────────────────────────────
 function enviarMensaje() {
     const txt = document.getElementById("txtMensaje");
