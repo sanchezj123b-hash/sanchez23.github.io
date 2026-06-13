@@ -245,23 +245,91 @@ function destruirConexion(nombre) {
 
 // ── CÁMARA ────────────────────────────────────────────────────
 function controlarCamaraLocal() {
+
     const btn = document.getElementById("btnCamara");
+
     if (miStream) {
+
         miStream.getTracks().forEach(t => t.stop());
+
         miStream = null;
+
         document.getElementById("localVideo").srcObject = null;
-        btn.innerText = "Encender Cámara/Audio"; btn.style.background = "#28a745";
-        enviarATodos({ tipo: "camara_apagada" });
-    } else {
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-            .then(stream => {
-                miStream = stream;
-                const lv = document.getElementById("localVideo");
-                lv.srcObject = stream; lv.style.transform = "scaleX(-1)";
-                btn.innerText = "Apagar Cámara/Audio"; btn.style.background = "#dc3545";
-            })
-            .catch(() => alert("Verifica los permisos de cámara."));
+
+        btn.innerText = "Encender Cámara/Audio";
+        btn.style.background = "#28a745";
+
+        enviarATodos({
+            tipo: "camara_apagada"
+        });
+
+        return;
     }
+
+    navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+    })
+    .then(stream => {
+
+        miStream = stream;
+
+        const lv = document.getElementById("localVideo");
+
+        lv.srcObject = stream;
+        lv.style.transform = "scaleX(-1)";
+
+        btn.innerText = "Apagar Cámara/Audio";
+        btn.style.background = "#dc3545";
+
+        Object.values(conexiones).forEach(c => {
+
+            if (!c.call) return;
+
+            try {
+
+                c.call.peerConnection
+                    .getSenders()
+                    .forEach(sender => {
+
+                        if (!sender.track) return;
+
+                        if (
+                            sender.track.kind === "video" &&
+                            stream.getVideoTracks()[0]
+                        ) {
+                            sender.replaceTrack(
+                                stream.getVideoTracks()[0]
+                            );
+                        }
+
+                        if (
+                            sender.track.kind === "audio" &&
+                            stream.getAudioTracks()[0]
+                        ) {
+                            sender.replaceTrack(
+                                stream.getAudioTracks()[0]
+                            );
+                        }
+
+                    });
+
+            } catch (e) {
+                console.error(e);
+            }
+
+        });
+
+    })
+    .catch(err => {
+
+        console.error(err);
+
+        alert(
+            "Verifica permisos de cámara y micrófono."
+        );
+
+    });
 }
 
 // ── CHAT ──────────────────────────────────────────────────────
