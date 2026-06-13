@@ -18,6 +18,7 @@
         video { width: 100%; height: 100%; object-fit: cover; background: #111; }
         .video-box span { position: absolute; bottom: 5px; left: 5px; background: rgba(0,0,0,0.6); padding: 2px 6px; font-size: 12px; border-radius: 3px; z-index: 10; }
         input[type="text"] { padding: 8px; background: #333; color: white; border: none; border-radius: 4px; }
+        .estado { font-size: 12px; color: #888; margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -25,7 +26,8 @@
 <div id="pantallaEspera">
     <div class="cuadro-espera">
         <h2>⏳ Esperando que el anfitrión te permita ingresar...</h2>
-        <p>Conectado a la reunión <strong id="lblSalaEspera" style="color:#ffc107;"></strong></p>
+        <p>Sala: <strong id="lblSalaEspera" style="color:#ffc107;"></strong></p>
+        <p id="estadoEspera" style="color:#888;font-size:13px;">Conectando al servidor...</p>
     </div>
 </div>
 
@@ -33,14 +35,14 @@
     <div class="barra-superior">
         <div>🔗 Sala: <span id="lblSalaID" style="color:#ffc107;"></span> | ROL: <strong>Participante</strong></div>
         <div>Usuario: <strong id="lblNombreBar" style="color:#0e71eb;"></strong></div>
-        <button style="background-color:#dc3545;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;" onclick="abandonarSala()">Salir de la Reunión</button>
+        <button style="background:#dc3545;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;" onclick="abandonarSala()">Salir de la Reunión</button>
     </div>
     <div class="contenedor-principal">
         <div class="seccion-chat">
             <div id="mensajes"></div>
             <div style="display:flex;gap:5px;">
                 <input type="text" id="txtMensaje" placeholder="Escribe un mensaje..." style="width:100%;">
-                <button style="background-color:#0e71eb;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;" onclick="enviarMensaje()">Enviar</button>
+                <button style="background:#0e71eb;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;" onclick="enviarMensaje()">Enviar</button>
             </div>
         </div>
         <div class="seccion-videos">
@@ -55,135 +57,140 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
-// =============================================
-//  *** PEGA AQUÍ TUS CREDENCIALES DE SUPABASE ***
-// =============================================
-const SUPABASE_URL = "https://TU_PROYECTO.supabase.co";
-const SUPABASE_KEY = "TU_ANON_KEY_AQUI";
-// =============================================
-
-const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
-
 const params   = new URLSearchParams(window.location.search);
-const salaID   = params.get("id") || "";
+const salaID   = decodeURIComponent(params.get("id")     || "");
 const miNombre = decodeURIComponent(params.get("nombre") || "Participante");
 
 if (!salaID) { window.location.href = "index.html"; }
+
+// ID del anfitrión (mismo formato que usa crearreunion.html)
+const peerIdAnfitrion = "zoomof-" + salaID.replace(/[^a-zA-Z0-9]/g, "-");
 
 document.getElementById("lblSalaEspera").textContent  = salaID;
 document.getElementById("lblSalaID").textContent      = salaID;
 document.getElementById("lblNombreBar").textContent   = miNombre;
 document.getElementById("lblNombreLocal").textContent = "Tú (Participante) - " + miNombre;
-document.title = "Participante - Sala: " + salaID;
+document.title = "Participante - " + salaID;
 
-const supabase     = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-let canal          = null;
-let miStream       = null;
-let conexionesPeer = {};  // { nombreRemoto: RTCPeerConnection }
-let admitido       = false;
-let nombreAnfitrion = "";
+let peer     = null;
+let connData = null;   // DataConnection con el anfitrión
+let callVid  = null;   // MediaConnection con el anfitrión
+let miStream = null;
+let admitido = false;
 
-// ── INICIAR ────────────────────────────────────────────────
-async function iniciar() {
-    canal = supabase.channel("sala:" + salaID, {
-        config: { broadcast: { self: false } }
+// ── INICIAR ───────────────────────────────────────────────────
+window.addEventListener("load", () => {
+    // ID único para este participante
+    const miPeerId = "zoomof-part-" + Date.now() + "-" + Math.floor(Math.random() * 9999);
+    peer = new Peer(miPeerId);
+
+    peer.on("open", () => {
+        document.getElementById("estadoEspera").innerText = "✅ Conectado. Llamando al anfitrión...";
+        document.getElementById("estadoEspera").style.color = "#28a745";
+        conectarConAnfitrion();
     });
 
-    canal
-        .on("broadcast", { event: "señal" }, ({ payload }) => manejarSenal(payload))
-        .subscribe((status) => {
-            if (status === "SUBSCRIBED") {
-                // Tocar la puerta al anfitrión
-                enviarSenal({ tipo: "solicitar_entrada", nombre: miNombre, destinatario: "" });
-                console.log("✅ Solicitud de entrada enviada");
-            }
-        });
+    peer.on("error", (err) => {
+        console.error("Error PeerJS:", err);
+        document.getElementById("estadoEspera").innerText = "❌ Error al conectar: " + err.message;
+        document.getElementById("estadoEspera").style.color = "#dc3545";
+    });
+});
 
+// ── CONECTAR CON ANFITRIÓN ────────────────────────────────────
+function conectarConAnfitrion() {
+    // 1. Abrir canal de datos (señalización + chat)
+    connData = peer.connect(peerIdAnfitrion, {
+        metadata: { nombre: miNombre },
+        reliable: true
+    });
+
+    connData.on("open", () => {
+        console.log("✅ Canal de datos abierto con el anfitrión");
+        document.getElementById("estadoEspera").innerText = "⏳ Esperando que el anfitrión te admita...";
+    });
+
+    connData.on("data", (data) => {
+        if (!data || !data.tipo) return;
+        switch (data.tipo) {
+            case "entrada_aprobada":
+                admitido = true;
+                activarSala();
+                iniciarLlamadaVideo();
+                break;
+            case "sala_cerrada":
+                window.location.href = "index.html";
+                break;
+            case "mensaje":
+                if (admitido) mostrarMensaje(data.nombre, data.mensaje);
+                break;
+            case "camara_apagada": {
+                const v = document.getElementById("video-anfitrion");
+                if (v) v.srcObject = null;
+                break;
+            }
+        }
+    });
+
+    connData.on("close", () => {
+        if (admitido) {
+            mostrarMensaje("Sistema", "El anfitrión se desconectó.");
+        } else {
+            document.getElementById("estadoEspera").innerText = "❌ El anfitrión cerró la sala.";
+        }
+    });
+
+    connData.on("error", (err) => {
+        console.error("Error canal datos:", err);
+        document.getElementById("estadoEspera").innerText = "❌ No se encontró la sala. Verifica el ID.";
+        document.getElementById("estadoEspera").style.color = "#dc3545";
+    });
+}
+
+// ── LLAMADA DE VIDEO ──────────────────────────────────────────
+function iniciarLlamadaVideo() {
+    // Llamar al anfitrión con el stream local (o null si no hay cámara)
+    callVid = peer.call(peerIdAnfitrion, miStream || new MediaStream(), {
+        metadata: { nombre: miNombre }
+    });
+
+    callVid.on("stream", (stream) => {
+        crearBox("anfitrion");
+        const v = document.getElementById("video-anfitrion");
+        if (v) v.srcObject = stream;
+    });
+
+    callVid.on("close", () => {
+        const el = document.getElementById("box-anfitrion");
+        if (el) el.remove();
+    });
+}
+
+// ── ACTIVAR SALA ──────────────────────────────────────────────
+function activarSala() {
+    document.getElementById("pantallaEspera").style.display = "none";
+    document.getElementById("interfazReunion").style.display = "block";
     document.getElementById("txtMensaje").addEventListener("keypress", e => {
         if (e.key === "Enter") enviarMensaje();
     });
 }
 
-// ── ENVIAR SEÑAL ────────────────────────────────────────────
-function enviarSenal(payload) {
-    if (canal) canal.send({ type: "broadcast", event: "señal", payload });
-}
-
-// ── MANEJAR SEÑALES ENTRANTES ───────────────────────────────
-function manejarSenal(data) {
-    if (!data || !data.tipo) return;
-    const remoto = data.nombre;
-    if (!remoto || remoto === miNombre) return;
-
-    switch (data.tipo) {
-
-        // El anfitrión nos aprobó
-        case "entrada_aprobada":
-            if (data.destinatario === miNombre && !admitido) {
-                admitido = true;
-                nombreAnfitrion = remoto;
-                console.log("🎉 Admitido por:", nombreAnfitrion);
-                activarSalaOficial();
-            }
-            break;
-
-        // La sala fue cerrada por el anfitrión
-        case "sala_cerrada":
-            window.location.href = "index.html";
-            break;
-
-        // Mensaje de chat (solo si ya estamos dentro)
-        case "mensaje":
-            if (admitido) mostrarMensaje(remoto, data.mensaje);
-            break;
-
-        // Alguien apagó su cámara
-        case "camara_apagada": {
-            const v = document.getElementById("video-" + remoto);
-            if (v) v.srcObject = null;
-            break;
-        }
-
-        // ── Señalización WebRTC (solo si ya estamos admitidos y el destinatario es este participante) ──
-        case "offer":
-            if (admitido && data.destinatario === miNombre) recibirOffer(remoto, data.sdp);
-            break;
-
-        case "answer":
-            if (admitido && data.destinatario === miNombre && conexionesPeer[remoto])
-                conexionesPeer[remoto].setRemoteDescription(new RTCSessionDescription(data.sdp));
-            break;
-
-        case "candidate":
-            if (admitido && data.destinatario === miNombre && conexionesPeer[remoto])
-                conexionesPeer[remoto].addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {});
-            break;
-    }
-}
-
-// ── ACTIVAR SALA ────────────────────────────────────────────
-function activarSalaOficial() {
-    document.getElementById("pantallaEspera").style.display = "none";
-    document.getElementById("interfazReunion").style.display = "block";
-    // El anfitrión enviará la oferta WebRTC — nosotros solo esperamos
-    // Si quisiéramos iniciar nosotros, llamaríamos iniciarConexion(nombreAnfitrion) aquí
-}
-
-// ── VIDEO BOXES ─────────────────────────────────────────────
-function crearRecuadroVisualGris(nombre) {
+// ── CAJAS DE VIDEO ────────────────────────────────────────────
+function crearBox(nombre) {
     if (document.getElementById("box-" + nombre)) return;
     const box = document.createElement("div");
     box.className = "video-box"; box.id = "box-" + nombre;
     const v = document.createElement("video");
     v.id = "video-" + nombre; v.autoplay = true; v.playsinline = true;
-    const s = document.createElement("span"); s.innerText = nombre;
+    const s = document.createElement("span");
+    s.innerText = nombre === "anfitrion" ? "Anfitrión" : nombre;
     box.appendChild(v); box.appendChild(s);
     document.getElementById("salaVideos").appendChild(box);
 }
 
-// ── CÁMARA LOCAL ────────────────────────────────────────────
+// ── CÁMARA ────────────────────────────────────────────────────
 function controlarCamaraLocal() {
     const btn = document.getElementById("btnCamara");
     if (miStream) {
@@ -191,10 +198,7 @@ function controlarCamaraLocal() {
         miStream = null;
         document.getElementById("localVideo").srcObject = null;
         btn.innerText = "Encender Cámara/Audio"; btn.style.background = "#28a745";
-        Object.values(conexionesPeer).forEach(pc => {
-            pc.getSenders().forEach(s => { if (s.track) pc.removeTrack(s); });
-        });
-        enviarSenal({ tipo: "camara_apagada", nombre: miNombre, destinatario: "" });
+        if (connData && connData.open) connData.send({ tipo: "camara_apagada" });
     } else {
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then(stream => {
@@ -202,63 +206,25 @@ function controlarCamaraLocal() {
                 const lv = document.getElementById("localVideo");
                 lv.srcObject = stream; lv.style.transform = "scaleX(-1)";
                 btn.innerText = "Apagar Cámara/Audio"; btn.style.background = "#dc3545";
-                // Inyectar stream en conexiones existentes
-                Object.entries(conexionesPeer).forEach(([remoto, pc]) => {
-                    if (pc.signalingState !== "closed") {
-                        stream.getTracks().forEach(t => {
-                            if (!pc.getSenders().some(s => s.track && s.track.kind === t.kind))
-                                pc.addTrack(t, stream);
-                        });
-                    }
-                });
+                // Si ya hay una llamada activa, reemplazar el stream
+                if (callVid) {
+                    stream.getTracks().forEach(t => {
+                        const sender = callVid.peerConnection.getSenders()
+                            .find(s => s.track && s.track.kind === t.kind);
+                        if (sender) sender.replaceTrack(t);
+                    });
+                }
             })
-            .catch(() => alert("Verifica los permisos de tu cámara."));
+            .catch(() => alert("Verifica los permisos de cámara."));
     }
 }
 
-// ── WebRTC ──────────────────────────────────────────────────
-
-// Participante recibe una oferta del anfitrión (o de otro participante)
-function recibirOffer(remoto, sdp) {
-    crearRecuadroVisualGris(remoto);
-
-    if (!conexionesPeer[remoto]) {
-        const pc = new RTCPeerConnection(rtcConfig);
-        conexionesPeer[remoto] = pc;
-
-        // Agregar tracks locales si la cámara está encendida
-        if (miStream) miStream.getTracks().forEach(t => pc.addTrack(t, miStream));
-
-        pc.onicecandidate = e => {
-            if (e.candidate)
-                enviarSenal({ tipo: "candidate", nombre: miNombre, destinatario: remoto, candidate: e.candidate });
-        };
-
-        pc.ontrack = e => {
-            const v = document.getElementById("video-" + remoto);
-            if (v) v.srcObject = e.streams[0];
-        };
-    }
-
-    const pc = conexionesPeer[remoto];
-    pc.setRemoteDescription(new RTCSessionDescription(sdp))
-        .then(() => pc.createAnswer())
-        .then(a => pc.setLocalDescription(a))
-        .then(() => enviarSenal({ tipo: "answer", nombre: miNombre, destinatario: remoto, sdp: pc.localDescription }))
-        .catch(e => console.error("Error respondiendo oferta:", e));
-}
-
-function destruirPeer(nombre) {
-    if (conexionesPeer[nombre]) { conexionesPeer[nombre].close(); delete conexionesPeer[nombre]; }
-    const el = document.getElementById("box-" + nombre); if (el) el.remove();
-}
-
-// ── CHAT ────────────────────────────────────────────────────
+// ── CHAT ──────────────────────────────────────────────────────
 function enviarMensaje() {
     const txt = document.getElementById("txtMensaje");
     const texto = txt.value.trim();
-    if (!texto) return;
-    enviarSenal({ tipo: "mensaje", nombre: miNombre, destinatario: "", mensaje: texto });
+    if (!texto || !connData || !connData.open) return;
+    connData.send({ tipo: "mensaje", nombre: miNombre, mensaje: texto });
     mostrarMensaje(miNombre, texto);
     txt.value = ""; txt.focus();
 }
@@ -274,13 +240,11 @@ function mostrarMensaje(nombre, texto) {
     c.appendChild(p); c.scrollTop = c.scrollHeight;
 }
 
-// ── SALIR ────────────────────────────────────────────────────
+// ── SALIR ─────────────────────────────────────────────────────
 function abandonarSala() {
-    if (canal) canal.unsubscribe();
+    if (peer) peer.destroy();
     window.location.href = "index.html";
 }
-
-iniciar();
 </script>
 </body>
 </html>
