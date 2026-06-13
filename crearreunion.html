@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Anfitrión - ZoomOf</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #1a1a1a; color: #fff; }
+        .barra-superior { background: #222; padding: 10px 20px; border-radius: 6px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid #e74c3c; flex-wrap: wrap; gap: 8px; }
+        .sala-espera-contenedor { background: #3a2e12; border: 2px solid #d39e00; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .lista-espera { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+        .tarjeta-espera { background: #222; padding: 10px 15px; border-radius: 6px; border: 1px solid #d39e00; display: flex; align-items: center; gap: 10px; }
+        .contenedor-principal { display: flex; gap: 20px; flex-wrap: wrap; }
+        .seccion-chat { flex: 1; min-width: 220px; background: #2a2a2a; padding: 15px; border-radius: 8px; }
+        #mensajes { height: 250px; border: 1px solid #444; overflow-y: auto; padding: 10px; background: #222; margin-bottom: 10px; }
+        .seccion-videos { flex: 2; min-width: 280px; background: #2a2a2a; padding: 15px; border-radius: 8px; }
+        .grid-videos { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 15px; }
+        .video-box { position: relative; background: #222; border-radius: 6px; overflow: hidden; height: 180px; border: 2px solid #444; }
+        video { width: 100%; height: 100%; object-fit: cover; background: #111; }
+        .video-box span { position: absolute; bottom: 5px; left: 5px; background: rgba(0,0,0,0.6); padding: 2px 6px; font-size: 12px; border-radius: 3px; z-index: 10; }
+        input[type="text"] { padding: 8px; background: #333; color: white; border: none; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<div class="barra-superior">
+    <div>🔒 ID de sala: <span id="lblSalaID" style="color:#ffc107;"></span> | ROL: <strong>Anfitrión (Host)</strong></div>
+    <div>Tiempo Límite: <span id="temporizador">30:00</span></div>
+    <button style="background-color:#dc3545;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;" onclick="cerrarSalaForzada()">Finalizar Reunión para Todos</button>
+</div>
+
+<div class="sala-espera-contenedor">
+    <strong>⏳ Sala de Espera (usuarios esperando aprobación):</strong>
+    <div class="lista-espera" id="contenedorEspera"></div>
+</div>
+
+<div class="contenedor-principal">
+    <div class="seccion-chat">
+        <div id="mensajes"></div>
+        <div style="display:flex;gap:5px;">
+            <input type="text" id="txtMensaje" placeholder="Escribe un mensaje..." style="width:100%;">
+            <button style="background-color:#0e71eb;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;" onclick="enviarMensaje()">Enviar</button>
+        </div>
+    </div>
+    <div class="seccion-videos">
+        <button id="btnCamara" style="background:#28a745;color:white;margin-bottom:15px;padding:8px 16px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;" onclick="controlarCamaraLocal()">Encender Cámara/Audio</button>
+        <div class="grid-videos" id="salaVideos">
+            <div class="video-box" id="box-local">
+                <video id="localVideo" autoplay playsinline muted></video>
+                <span id="lblNombreLocal">Tú (Anfitrión)</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// =============================================
+//  *** PEGA AQUÍ TUS CREDENCIALES DE SUPABASE ***
+// =============================================
+const SUPABASE_URL = "https://TU_PROYECTO.supabase.co";
+const SUPABASE_KEY = "TU_ANON_KEY_AQUI";
+// =============================================
+
+const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+const params   = new URLSearchParams(window.location.search);
+const salaID   = params.get("id") || "";
+const miNombre = decodeURIComponent(params.get("nombre") || "Anfitrión");
+
+if (!salaID) { window.location.href = "index.html"; }
+
+document.getElementById("lblSalaID").textContent     = salaID;
+document.getElementById("lblNombreLocal").textContent = "Tú (Anfitrión) - " + miNombre;
+document.title = "Anfitrión - Sala: " + salaID;
+
+const supabase       = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+let canal            = null;
+let miStream         = null;
+let conexionesPeer   = {};   // { nombreRemoto: RTCPeerConnection }
+let usuariosEnEspera = [];
+let tiempoRestante   = 30 * 60;
+
+// ── INICIAR ────────────────────────────────────────────────
+async function iniciar() {
+    canal = supabase.channel("sala:" + salaID, {
+        config: { broadcast: { self: false } }
+    });
+
+    canal
+        .on("broadcast", { event: "señal" }, ({ payload }) => manejarSenal(payload))
+        .subscribe((status) => {
+            if (status === "SUBSCRIBED") console.log("✅ Anfitrión suscrito al canal:", salaID);
+        });
+
+    setInterval(() => {
+        tiempoRestante--;
+        const m = Math.floor(tiempoRestante / 60), s = tiempoRestante % 60;
+        document.getElementById("temporizador").innerText =
+            (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
+        if (tiempoRestante <= 0) cerrarSalaForzada();
+    }, 1000);
+
+    document.getElementById("txtMensaje").addEventListener("keypress", e => {
+        if (e.key === "Enter") enviarMensaje();
+    });
+}
+
+// ── ENVIAR SEÑAL ────────────────────────────────────────────
+function enviarSenal(payload) {
+    if (canal) canal.send({ type: "broadcast", event: "señal", payload });
+}
+
+// ── MANEJAR SEÑALES ENTRANTES ───────────────────────────────
+function manejarSenal(data) {
+    if (!data || !data.tipo) return;
+    const remoto = data.nombre;
+    if (!remoto || remoto === miNombre) return;
+
+    switch (data.tipo) {
+
+        // Participante toca la puerta
+        case "solicitar_entrada":
+            agregarAListaEspera(remoto);
+            break;
+
+        // Mensajes de chat
+        case "mensaje":
+            mostrarMensaje(remoto, data.mensaje);
+            break;
+
+        // Participante apagó su cámara
+        case "camara_apagada": {
+            const v = document.getElementById("video-" + remoto);
+            if (v) v.srcObject = null;
+            break;
+        }
+
+        // Señalización WebRTC (solo si el destinatario soy yo)
+        case "offer":
+            if (data.destinatario === miNombre) recibirOffer(remoto, data.sdp);
+            break;
+        case "answer":
+            if (data.destinatario === miNombre && conexionesPeer[remoto])
+                conexionesPeer[remoto].setRemoteDescription(new RTCSessionDescription(data.sdp));
+            break;
+        case "candidate":
+            if (data.destinatario === miNombre && conexionesPeer[remoto])
+                conexionesPeer[remoto].addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {});
+            break;
+    }
+}
+
+// ── SALA DE ESPERA ──────────────────────────────────────────
+function agregarAListaEspera(nombre) {
+    if (!nombre || nombre === miNombre) return;
+    if (usuariosEnEspera.some(u => u.toLowerCase() === nombre.toLowerCase())) return;
+    usuariosEnEspera.push(nombre);
+    renderizarListaEspera();
+}
+
+function renderizarListaEspera() {
+    const c = document.getElementById("contenedorEspera");
+    c.innerHTML = "";
+    usuariosEnEspera.forEach(user => {
+        const div = document.createElement("div");
+        div.className = "tarjeta-espera";
+        div.innerHTML = `<span>👤 <strong>${user}</strong></span>`;
+        const btn = document.createElement("button");
+        btn.innerText = "Admitir";
+        btn.style = "background-color:#28a745;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;";
+        btn.onclick = () => admitirUsuario(user);
+        div.appendChild(btn);
+        c.appendChild(div);
+    });
+}
+
+function admitirUsuario(user) {
+    // 1. Avisarle al participante que fue aprobado
+    enviarSenal({ tipo: "entrada_aprobada", nombre: miNombre, destinatario: user });
+
+    // 2. Quitar de la lista de espera
+    usuariosEnEspera = usuariosEnEspera.filter(u => u !== user);
+    renderizarListaEspera();
+
+    // 3. Crear recuadro y luego iniciar la oferta WebRTC como iniciador
+    crearRecuadroVisualGris(user);
+    setTimeout(() => iniciarConexionConParticipante(user), 600);
+}
+
+// ── VIDEO BOXES ─────────────────────────────────────────────
+function crearRecuadroVisualGris(nombre) {
+    if (document.getElementById("box-" + nombre)) return;
+    const box = document.createElement("div");
+    box.className = "video-box"; box.id = "box-" + nombre;
+    const v = document.createElement("video");
+    v.id = "video-" + nombre; v.autoplay = true; v.playsinline = true;
+    const s = document.createElement("span"); s.innerText = nombre;
+    box.appendChild(v); box.appendChild(s);
+    document.getElementById("salaVideos").appendChild(box);
+}
+
+// ── CÁMARA LOCAL ────────────────────────────────────────────
+function controlarCamaraLocal() {
+    const btn = document.getElementById("btnCamara");
+    if (miStream) {
+        miStream.getTracks().forEach(t => t.stop());
+        miStream = null;
+        document.getElementById("localVideo").srcObject = null;
+        btn.innerText = "Encender Cámara/Audio"; btn.style.background = "#28a745";
+        Object.values(conexionesPeer).forEach(pc => {
+            pc.getSenders().forEach(s => { if (s.track) pc.removeTrack(s); });
+        });
+        enviarSenal({ tipo: "camara_apagada", nombre: miNombre, destinatario: "" });
+    } else {
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+                miStream = stream;
+                const lv = document.getElementById("localVideo");
+                lv.srcObject = stream; lv.style.transform = "scaleX(-1)";
+                btn.innerText = "Apagar Cámara/Audio"; btn.style.background = "#dc3545";
+                // Inyectar el stream en todas las conexiones existentes
+                Object.entries(conexionesPeer).forEach(([remoto, pc]) => {
+                    if (pc.signalingState !== "closed") {
+                        stream.getTracks().forEach(t => {
+                            if (!pc.getSenders().some(s => s.track && s.track.kind === t.kind))
+                                pc.addTrack(t, stream);
+                        });
+                    }
+                });
+            })
+            .catch(() => alert("Verifica los permisos de tu cámara en el navegador."));
+    }
+}
+
+// ── WebRTC ──────────────────────────────────────────────────
+
+// Anfitrión crea la conexión y manda la oferta al participante
+function iniciarConexionConParticipante(remoto) {
+    if (conexionesPeer[remoto]) return; // ya existe
+
+    const pc = new RTCPeerConnection(rtcConfig);
+    conexionesPeer[remoto] = pc;
+
+    // Agregar tracks locales si la cámara ya está encendida
+    if (miStream) miStream.getTracks().forEach(t => pc.addTrack(t, miStream));
+
+    // Cuando haya candidatos ICE, enviarlos
+    pc.onicecandidate = e => {
+        if (e.candidate)
+            enviarSenal({ tipo: "candidate", nombre: miNombre, destinatario: remoto, candidate: e.candidate });
+    };
+
+    // Cuando llegue video del participante, ponerlo en su recuadro
+    pc.ontrack = e => {
+        const v = document.getElementById("video-" + remoto);
+        if (v) v.srcObject = e.streams[0];
+    };
+
+    // Crear y enviar la oferta
+    pc.createOffer()
+        .then(o => pc.setLocalDescription(o))
+        .then(() => enviarSenal({ tipo: "offer", nombre: miNombre, destinatario: remoto, sdp: pc.localDescription }))
+        .catch(e => console.error("Error creando oferta:", e));
+}
+
+// Anfitrión recibe una oferta de un participante (caso poco común pero posible)
+function recibirOffer(remoto, sdp) {
+    if (!conexionesPeer[remoto]) {
+        const pc = new RTCPeerConnection(rtcConfig);
+        conexionesPeer[remoto] = pc;
+        if (miStream) miStream.getTracks().forEach(t => pc.addTrack(t, miStream));
+        pc.onicecandidate = e => {
+            if (e.candidate)
+                enviarSenal({ tipo: "candidate", nombre: miNombre, destinatario: remoto, candidate: e.candidate });
+        };
+        pc.ontrack = e => {
+            const v = document.getElementById("video-" + remoto);
+            if (v) v.srcObject = e.streams[0];
+        };
+    }
+    const pc = conexionesPeer[remoto];
+    pc.setRemoteDescription(new RTCSessionDescription(sdp))
+        .then(() => pc.createAnswer())
+        .then(a => pc.setLocalDescription(a))
+        .then(() => enviarSenal({ tipo: "answer", nombre: miNombre, destinatario: remoto, sdp: pc.localDescription }))
+        .catch(e => console.error("Error respondiendo oferta:", e));
+}
+
+function destruirPeer(nombre) {
+    if (conexionesPeer[nombre]) { conexionesPeer[nombre].close(); delete conexionesPeer[nombre]; }
+    const el = document.getElementById("box-" + nombre); if (el) el.remove();
+}
+
+// ── CHAT ────────────────────────────────────────────────────
+function enviarMensaje() {
+    const txt = document.getElementById("txtMensaje");
+    const texto = txt.value.trim();
+    if (!texto) return;
+    enviarSenal({ tipo: "mensaje", nombre: miNombre, destinatario: "", mensaje: texto });
+    mostrarMensaje(miNombre, texto);
+    txt.value = ""; txt.focus();
+}
+
+function mostrarMensaje(nombre, texto) {
+    const c = document.getElementById("mensajes");
+    const p = document.createElement("p"); p.style.margin = "6px 0";
+    const strong = document.createElement("strong");
+    strong.style.color = nombre === miNombre ? "#ffc107" : "#0e71eb";
+    strong.textContent = nombre + ": ";
+    const span = document.createElement("span"); span.textContent = texto;
+    p.appendChild(strong); p.appendChild(span);
+    c.appendChild(p); c.scrollTop = c.scrollHeight;
+}
+
+// ── CERRAR SALA ─────────────────────────────────────────────
+function cerrarSalaForzada() {
+    enviarSenal({ tipo: "sala_cerrada", nombre: miNombre, destinatario: "" });
+    setTimeout(() => { window.location.href = "index.html"; }, 400);
+}
+
+iniciar();
+</script>
+</body>
+</html>
