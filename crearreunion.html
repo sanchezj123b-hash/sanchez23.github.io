@@ -7,7 +7,7 @@
         body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #1a1a1a; color: #fff; }
         .barra-superior { background: #222; padding: 10px 20px; border-radius: 6px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid #e74c3c; flex-wrap: wrap; gap: 8px; }
         .sala-espera-contenedor { background: #3a2e12; border: 2px solid #d39e00; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-        .lista-espera { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+        .lista-espera { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; min-height: 40px; }
         .tarjeta-espera { background: #222; padding: 10px 15px; border-radius: 6px; border: 1px solid #d39e00; display: flex; align-items: center; gap: 10px; }
         .contenedor-principal { display: flex; gap: 20px; flex-wrap: wrap; }
         .seccion-chat { flex: 1; min-width: 220px; background: #2a2a2a; padding: 15px; border-radius: 8px; }
@@ -18,19 +18,23 @@
         video { width: 100%; height: 100%; object-fit: cover; background: #111; }
         .video-box span { position: absolute; bottom: 5px; left: 5px; background: rgba(0,0,0,0.6); padding: 2px 6px; font-size: 12px; border-radius: 3px; z-index: 10; }
         input[type="text"] { padding: 8px; background: #333; color: white; border: none; border-radius: 4px; }
+        .btn-admitir { background-color: #28a745; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 13px; }
+        .btn-admitir:hover { background-color: #218838; }
     </style>
 </head>
 <body>
 
 <div class="barra-superior">
-    <div>🔒 ID de sala: <span id="lblSalaID" style="color:#ffc107;"></span> | ROL: <strong>Anfitrión (Host)</strong></div>
-    <div>Tiempo Límite: <span id="temporizador">30:00</span></div>
-    <button style="background-color:#dc3545;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;" onclick="cerrarSalaForzada()">Finalizar Reunión para Todos</button>
+    <div>🔒 ID de sala: <strong id="lblSalaID" style="color:#ffc107; font-size:16px;">Cargando...</strong> | ROL: <strong>Anfitrión</strong></div>
+    <div>⏱ Tiempo: <strong id="temporizador" style="color:#ffc107;">30:00</strong></div>
+    <button style="background:#dc3545;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;" onclick="cerrarSalaForzada()">Finalizar para Todos</button>
 </div>
 
 <div class="sala-espera-contenedor">
-    <strong>⏳ Sala de Espera (usuarios esperando aprobación):</strong>
-    <div class="lista-espera" id="contenedorEspera"></div>
+    <strong>⏳ Sala de Espera — usuarios esperando aprobación:</strong>
+    <div id="contenedorEspera" class="lista-espera">
+        <span style="color:#888; font-size:13px;">Nadie esperando aún...</span>
+    </div>
 </div>
 
 <div class="contenedor-principal">
@@ -38,7 +42,7 @@
         <div id="mensajes"></div>
         <div style="display:flex;gap:5px;">
             <input type="text" id="txtMensaje" placeholder="Escribe un mensaje..." style="width:100%;">
-            <button style="background-color:#0e71eb;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;" onclick="enviarMensaje()">Enviar</button>
+            <button style="background:#0e71eb;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;" onclick="enviarMensaje()">Enviar</button>
         </div>
     </div>
     <div class="seccion-videos">
@@ -52,10 +56,11 @@
     </div>
 </div>
 
+<!-- Supabase carga primero, luego el script de la app -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 // =============================================
-//  *** PEGA AQUÍ TUS CREDENCIALES DE SUPABASE ***
+//  PEGA AQUÍ TUS CREDENCIALES DE SUPABASE
 // =============================================
 const SUPABASE_URL = "https://TU_PROYECTO.supabase.co";
 const SUPABASE_KEY = "TU_ANON_KEY_AQUI";
@@ -63,42 +68,55 @@ const SUPABASE_KEY = "TU_ANON_KEY_AQUI";
 
 const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
+// Leer parámetros — doble decode por si vienen doblemente codificados
 const params   = new URLSearchParams(window.location.search);
-const salaID   = params.get("id") || "";
+const salaID   = decodeURIComponent(params.get("id")     || "");
 const miNombre = decodeURIComponent(params.get("nombre") || "Anfitrión");
 
 if (!salaID) { window.location.href = "index.html"; }
 
-document.getElementById("lblSalaID").textContent     = salaID;
-document.getElementById("lblNombreLocal").textContent = "Tú (Anfitrión) - " + miNombre;
-document.title = "Anfitrión - Sala: " + salaID;
+// Mostrar ID y nombre en pantalla inmediatamente
+document.getElementById("lblSalaID").textContent      = salaID;
+document.getElementById("lblNombreLocal").textContent  = "Tú (Anfitrión) - " + miNombre;
+document.title = "Anfitrión - " + salaID;
 
-const supabase       = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-let canal            = null;
-let miStream         = null;
-let conexionesPeer   = {};   // { nombreRemoto: RTCPeerConnection }
-let usuariosEnEspera = [];
-let tiempoRestante   = 30 * 60;
+let canal          = null;
+let miStream       = null;
+let conexionesPeer = {};
+let enEspera       = [];
+let segundos       = 30 * 60;
+let timerId        = null;
 
-// ── INICIAR ────────────────────────────────────────────────
-async function iniciar() {
-    canal = supabase.channel("sala:" + salaID, {
+// ── TEMPORIZADOR (arranca solo, independiente de Supabase) ──
+function arrancarTemporizador() {
+    timerId = setInterval(() => {
+        segundos--;
+        const m = Math.floor(segundos / 60);
+        const s = segundos % 60;
+        document.getElementById("temporizador").innerText =
+            (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
+        if (segundos <= 0) { clearInterval(timerId); cerrarSalaForzada(); }
+    }, 1000);
+}
+
+// ── INICIAR SUPABASE ────────────────────────────────────────
+function iniciar() {
+    if (!window.supabase) {
+        console.error("❌ Supabase no cargó. Verifica tu conexión a internet.");
+        return;
+    }
+
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    canal = sb.channel("sala:" + salaID, {
         config: { broadcast: { self: false } }
     });
 
     canal
         .on("broadcast", { event: "señal" }, ({ payload }) => manejarSenal(payload))
         .subscribe((status) => {
-            if (status === "SUBSCRIBED") console.log("✅ Anfitrión suscrito al canal:", salaID);
+            console.log("Canal estado:", status);
         });
-
-    setInterval(() => {
-        tiempoRestante--;
-        const m = Math.floor(tiempoRestante / 60), s = tiempoRestante % 60;
-        document.getElementById("temporizador").innerText =
-            (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
-        if (tiempoRestante <= 0) cerrarSalaForzada();
-    }, 1000);
 
     document.getElementById("txtMensaje").addEventListener("keypress", e => {
         if (e.key === "Enter") enviarMensaje();
@@ -110,32 +128,26 @@ function enviarSenal(payload) {
     if (canal) canal.send({ type: "broadcast", event: "señal", payload });
 }
 
-// ── MANEJAR SEÑALES ENTRANTES ───────────────────────────────
+// ── MANEJAR SEÑALES ─────────────────────────────────────────
 function manejarSenal(data) {
     if (!data || !data.tipo) return;
     const remoto = data.nombre;
     if (!remoto || remoto === miNombre) return;
 
-    switch (data.tipo) {
+    console.log("Señal recibida:", data.tipo, "de:", remoto);
 
-        // Participante toca la puerta
+    switch (data.tipo) {
         case "solicitar_entrada":
             agregarAListaEspera(remoto);
             break;
-
-        // Mensajes de chat
         case "mensaje":
             mostrarMensaje(remoto, data.mensaje);
             break;
-
-        // Participante apagó su cámara
         case "camara_apagada": {
             const v = document.getElementById("video-" + remoto);
             if (v) v.srcObject = null;
             break;
         }
-
-        // Señalización WebRTC (solo si el destinatario soy yo)
         case "offer":
             if (data.destinatario === miNombre) recibirOffer(remoto, data.sdp);
             break;
@@ -153,42 +165,48 @@ function manejarSenal(data) {
 // ── SALA DE ESPERA ──────────────────────────────────────────
 function agregarAListaEspera(nombre) {
     if (!nombre || nombre === miNombre) return;
-    if (usuariosEnEspera.some(u => u.toLowerCase() === nombre.toLowerCase())) return;
-    usuariosEnEspera.push(nombre);
-    renderizarListaEspera();
+    if (enEspera.some(u => u.toLowerCase() === nombre.toLowerCase())) return;
+    enEspera.push(nombre);
+    renderizarEspera();
 }
 
-function renderizarListaEspera() {
+function renderizarEspera() {
     const c = document.getElementById("contenedorEspera");
     c.innerHTML = "";
-    usuariosEnEspera.forEach(user => {
+
+    if (enEspera.length === 0) {
+        c.innerHTML = '<span style="color:#888;font-size:13px;">Nadie esperando aún...</span>';
+        return;
+    }
+
+    enEspera.forEach(user => {
         const div = document.createElement("div");
         div.className = "tarjeta-espera";
-        div.innerHTML = `<span>👤 <strong>${user}</strong></span>`;
+
+        const span = document.createElement("span");
+        span.innerHTML = "👤 <strong>" + user + "</strong>";
+
         const btn = document.createElement("button");
-        btn.innerText = "Admitir";
-        btn.style = "background-color:#28a745;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;";
-        btn.onclick = () => admitirUsuario(user);
+        btn.className = "btn-admitir";
+        btn.textContent = "✅ Admitir";
+        btn.onclick = function() { admitirUsuario(user); };
+
+        div.appendChild(span);
         div.appendChild(btn);
         c.appendChild(div);
     });
 }
 
 function admitirUsuario(user) {
-    // 1. Avisarle al participante que fue aprobado
     enviarSenal({ tipo: "entrada_aprobada", nombre: miNombre, destinatario: user });
-
-    // 2. Quitar de la lista de espera
-    usuariosEnEspera = usuariosEnEspera.filter(u => u !== user);
-    renderizarListaEspera();
-
-    // 3. Crear recuadro y luego iniciar la oferta WebRTC como iniciador
-    crearRecuadroVisualGris(user);
-    setTimeout(() => iniciarConexionConParticipante(user), 600);
+    enEspera = enEspera.filter(u => u !== user);
+    renderizarEspera();
+    crearBox(user);
+    setTimeout(() => iniciarConexion(user), 600);
 }
 
-// ── VIDEO BOXES ─────────────────────────────────────────────
-function crearRecuadroVisualGris(nombre) {
+// ── CAJAS DE VIDEO ──────────────────────────────────────────
+function crearBox(nombre) {
     if (document.getElementById("box-" + nombre)) return;
     const box = document.createElement("div");
     box.className = "video-box"; box.id = "box-" + nombre;
@@ -199,7 +217,7 @@ function crearRecuadroVisualGris(nombre) {
     document.getElementById("salaVideos").appendChild(box);
 }
 
-// ── CÁMARA LOCAL ────────────────────────────────────────────
+// ── CÁMARA ──────────────────────────────────────────────────
 function controlarCamaraLocal() {
     const btn = document.getElementById("btnCamara");
     if (miStream) {
@@ -218,7 +236,6 @@ function controlarCamaraLocal() {
                 const lv = document.getElementById("localVideo");
                 lv.srcObject = stream; lv.style.transform = "scaleX(-1)";
                 btn.innerText = "Apagar Cámara/Audio"; btn.style.background = "#dc3545";
-                // Inyectar el stream en todas las conexiones existentes
                 Object.entries(conexionesPeer).forEach(([remoto, pc]) => {
                     if (pc.signalingState !== "closed") {
                         stream.getTracks().forEach(t => {
@@ -228,43 +245,32 @@ function controlarCamaraLocal() {
                     }
                 });
             })
-            .catch(() => alert("Verifica los permisos de tu cámara en el navegador."));
+            .catch(() => alert("Verifica los permisos de cámara en el navegador."));
     }
 }
 
 // ── WebRTC ──────────────────────────────────────────────────
-
-// Anfitrión crea la conexión y manda la oferta al participante
-function iniciarConexionConParticipante(remoto) {
-    if (conexionesPeer[remoto]) return; // ya existe
-
+function iniciarConexion(remoto) {
+    if (conexionesPeer[remoto]) return;
     const pc = new RTCPeerConnection(rtcConfig);
     conexionesPeer[remoto] = pc;
-
-    // Agregar tracks locales si la cámara ya está encendida
     if (miStream) miStream.getTracks().forEach(t => pc.addTrack(t, miStream));
-
-    // Cuando haya candidatos ICE, enviarlos
     pc.onicecandidate = e => {
         if (e.candidate)
             enviarSenal({ tipo: "candidate", nombre: miNombre, destinatario: remoto, candidate: e.candidate });
     };
-
-    // Cuando llegue video del participante, ponerlo en su recuadro
     pc.ontrack = e => {
         const v = document.getElementById("video-" + remoto);
         if (v) v.srcObject = e.streams[0];
     };
-
-    // Crear y enviar la oferta
     pc.createOffer()
         .then(o => pc.setLocalDescription(o))
         .then(() => enviarSenal({ tipo: "offer", nombre: miNombre, destinatario: remoto, sdp: pc.localDescription }))
-        .catch(e => console.error("Error creando oferta:", e));
+        .catch(e => console.error("Error offer:", e));
 }
 
-// Anfitrión recibe una oferta de un participante (caso poco común pero posible)
 function recibirOffer(remoto, sdp) {
+    crearBox(remoto);
     if (!conexionesPeer[remoto]) {
         const pc = new RTCPeerConnection(rtcConfig);
         conexionesPeer[remoto] = pc;
@@ -283,12 +289,7 @@ function recibirOffer(remoto, sdp) {
         .then(() => pc.createAnswer())
         .then(a => pc.setLocalDescription(a))
         .then(() => enviarSenal({ tipo: "answer", nombre: miNombre, destinatario: remoto, sdp: pc.localDescription }))
-        .catch(e => console.error("Error respondiendo oferta:", e));
-}
-
-function destruirPeer(nombre) {
-    if (conexionesPeer[nombre]) { conexionesPeer[nombre].close(); delete conexionesPeer[nombre]; }
-    const el = document.getElementById("box-" + nombre); if (el) el.remove();
+        .catch(e => console.error("Error answer:", e));
 }
 
 // ── CHAT ────────────────────────────────────────────────────
@@ -312,13 +313,15 @@ function mostrarMensaje(nombre, texto) {
     c.appendChild(p); c.scrollTop = c.scrollHeight;
 }
 
-// ── CERRAR SALA ─────────────────────────────────────────────
+// ── CERRAR SALA ──────────────────────────────────────────────
 function cerrarSalaForzada() {
     enviarSenal({ tipo: "sala_cerrada", nombre: miNombre, destinatario: "" });
     setTimeout(() => { window.location.href = "index.html"; }, 400);
 }
 
-iniciar();
+// ── ARRANCAR TODO ────────────────────────────────────────────
+arrancarTemporizador();   // Temporizador corre desde el primer segundo
+window.addEventListener("load", iniciar);  // Supabase arranca cuando la página cargó del todo
 </script>
 </body>
 </html>
