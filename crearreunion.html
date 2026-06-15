@@ -245,90 +245,64 @@ function destruirConexion(nombre) {
 
 // ── CÁMARA ────────────────────────────────────────────────────
 function controlarCamaraLocal() {
-
     const btn = document.getElementById("btnCamara");
 
-    if (miStream) {
-
-        miStream.getTracks().forEach(t => t.stop());
-
-        miStream = null;
-
-        document.getElementById("localVideo").srcObject = null;
-
+    // 1. SI LA CÁMARA ESTÁ ACTIVA, LA PAUSAMOS DE FORMA SEGURA (MUTE)
+    if (miStream && miStream.getVideoTracks()[0] && miStream.getVideoTracks()[0].enabled === true) {
+        miStream.getVideoTracks().forEach(track => track.enabled = false); // Oculta el video sin romper el canal PeerJS
+        
         btn.innerText = "Encender Cámara/Audio";
-        btn.style.background = "#28a745";
+        btn.style.background = "#28a745"; // Verde
 
-        enviarATodos({
-            tipo: "camara_apagada"
-        });
-
+        enviarATodos({ tipo: "camara_apagada" }); // Le avisa al participante
         return;
     }
 
+    // 2. SI LA CÁMARA YA EXISTÍA PERO ESTABA PAUSADA, LA REACTIVAMOS AL INSTANTE
+    if (miStream && miStream.getVideoTracks()[0] && miStream.getVideoTracks()[0].enabled === false) {
+        miStream.getVideoTracks().forEach(track => track.enabled = true); // Reactiva el video
+        
+        btn.innerText = "Apagar Cámara/Audio";
+        btn.style.background = "#dc3545"; // Rojo
+
+        enviarATodos({ tipo: "camara_encendida" }); // Evento para que el participante restaure el video
+        return;
+    }
+
+    // 3. PRIMER ENCENDIDO DE LA REUNIÓN (Pedir permisos por primera vez)
     navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true
     })
     .then(stream => {
-
         miStream = stream;
-
         const lv = document.getElementById("localVideo");
-
-        lv.srcObject = stream;
-        lv.style.transform = "scaleX(-1)";
+        if (lv) {
+            lv.srcObject = stream;
+            lv.style.transform = "scaleX(-1)";
+        }
 
         btn.innerText = "Apagar Cámara/Audio";
         btn.style.background = "#dc3545";
 
+        // Inyecta el stream inicial en las conexiones activas
         Object.values(conexiones).forEach(c => {
-
             if (!c.call) return;
-
             try {
-
-                c.call.peerConnection
-                    .getSenders()
-                    .forEach(sender => {
-
-                        if (!sender.track) return;
-
-                        if (
-                            sender.track.kind === "video" &&
-                            stream.getVideoTracks()[0]
-                        ) {
-                            sender.replaceTrack(
-                                stream.getVideoTracks()[0]
-                            );
-                        }
-
-                        if (
-                            sender.track.kind === "audio" &&
-                            stream.getAudioTracks()[0]
-                        ) {
-                            sender.replaceTrack(
-                                stream.getAudioTracks()[0]
-                            );
-                        }
-
-                    });
-
+                c.call.peerConnection.getSenders().forEach(sender => {
+                    if (!sender.track) return;
+                    if (sender.track.kind === "video" && stream.getVideoTracks()[0]) {
+                        sender.replaceTrack(stream.getVideoTracks()[0]);
+                    }
+                });
             } catch (e) {
-                console.error(e);
+                console.error("Error al inyectar track:", e);
             }
-
         });
-
     })
     .catch(err => {
-
         console.error(err);
-
-        alert(
-            "Verifica permisos de cámara y micrófono."
-        );
-
+        alert("Verifica permisos de cámara y micrófono.");
     });
 }
 
