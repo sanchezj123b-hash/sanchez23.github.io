@@ -210,15 +210,46 @@ window.addEventListener("load", () => {
     // Participante llama con video
     peer.on("call", (call) => {
         const nombre = decodeURIComponent(call.metadata.nombre || call.peer);
-        console.log("📹 Llamada de video de:", nombre);
+        const esPantalla = nombre.includes("[Pantalla]");
+        const nombreBase = nombre.replace(" [Pantalla]", "").trim();
+        console.log("📹 Llamada de video de:", nombre, esPantalla ? "(pantalla)" : "");
+
+        // Llamada de pantalla: contestar si el participante base está admitido
+        if (esPantalla) {
+            if (conexiones[nombreBase] && conexiones[nombreBase].admitido) {
+                call.answer(null);
+                call.on("stream", (stream) => {
+                    const boxId = "box-pantalla-" + nombreBase;
+                    if (!document.getElementById(boxId)) {
+                        const box = document.createElement("div");
+                        box.className = "video-box"; box.id = boxId;
+                        const v = document.createElement("video");
+                        v.id = "video-pantalla-" + nombreBase;
+                        v.autoplay = true; v.playsinline = true;
+                        const s = document.createElement("span");
+                        s.innerText = "🖥️ " + nombreBase + " (Pantalla)";
+                        box.appendChild(v); box.appendChild(s);
+                        document.getElementById("salaVideos").appendChild(box);
+                    }
+                    const vEl = document.getElementById("video-pantalla-" + nombreBase);
+                    if (vEl) { vEl.srcObject = stream; vEl.play().catch(e => {}); }
+                });
+                call.on("close", () => {
+                    const b = document.getElementById("box-pantalla-" + nombreBase);
+                    if (b) b.remove();
+                });
+            }
+            return;
+        }
 
         // Solo contestar si fue admitido
         if (conexiones[nombre] && conexiones[nombre].admitido) {
             call.answer(miStream || null);
             call.on("stream", (stream) => {
+                conexiones[nombre].ultimoStream = stream;
                 crearBox(nombre);
                 const v = document.getElementById("video-" + nombre);
-                if (v) v.srcObject = stream;
+                if (v) { v.srcObject = stream; v.play().catch(e => console.log("Autoplay:", e)); }
             });
             conexiones[nombre].call = call;
         } else {
@@ -240,13 +271,30 @@ function manejarDatos(nombre, data) {
             const v = document.getElementById("video-" + nombre);
             if (v) v.srcObject = null;
             break;
+        case "camara_encendida":
+            // El stream ya fluye por WebRTC, solo necesitamos re-asignar si se perdió
+            const vEnc = document.getElementById("video-" + nombre);
+            if (vEnc && conexiones[nombre] && conexiones[nombre].ultimoStream) {
+                vEnc.srcObject = conexiones[nombre].ultimoStream;
+                vEnc.play().catch(e => console.log("Autoplay:", e));
+            }
+            break;
+        case "pantalla_iniciada":
+            mostrarMensaje("Sistema", "🖥️ " + nombre + " está compartiendo su pantalla.");
+            break;
+        case "pantalla_detenida":
+            mostrarMensaje("Sistema", "🖥️ " + nombre + " dejó de compartir pantalla.");
+            // Eliminar la caja de pantalla si existe
+            const boxPantalla = document.getElementById("box-" + nombre + " [Pantalla]") ||
+                                document.getElementById("box-pantalla-" + nombre);
+            if (boxPantalla) boxPantalla.remove();
+            break;
         case "reaccion":
-                // Si el ID de tus cajas de video es "box-Nombre", usamos "box-" + nombre
-                mostrarEmojiEnPantalla("box-" + nombre, data.emoji);
-                break;
+            mostrarEmojiEnPantalla("box-" + nombre, data.emoji);
+            break;
         case "mano_estado":
-                dibujarManoEnVideo("box-" + data.de, data.estado);
-                break;   
+            dibujarManoEnVideo("box-" + data.de, data.estado);
+            break;   
     }
 }
 
@@ -300,8 +348,9 @@ function admitirUsuario(nombre) {
         const call = conexiones[nombre].pendingCall;
         call.answer(miStream || null);
         call.on("stream", (stream) => {
+            conexiones[nombre].ultimoStream = stream;  // guardar para restaurar
             const v = document.getElementById("video-" + nombre);
-            if (v) v.srcObject = stream;
+            if (v) { v.srcObject = stream; v.play().catch(e => console.log("Autoplay:", e)); }
         });
         conexiones[nombre].call = call;
         delete conexiones[nombre].pendingCall;
