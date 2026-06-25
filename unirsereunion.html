@@ -86,6 +86,65 @@
     z-index: 9999 !important;
     padding: 0 !important;
 }
+
+        /* Barra de controles de video */
+        .barra-controles {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+        .btn-control {
+            padding: 8px 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 13px;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Video fijado: ocupa todo el ancho encima del grid */
+        .video-box.fijado {
+            grid-column: 1 / -1;
+            height: 360px !important;
+            border-color: #ffc107 !important;
+            order: -1;
+        }
+        .video-box.fijado::after {
+            content: "📌 Fijado";
+            position: absolute;
+            top: 8px;
+            right: 10px;
+            background: rgba(255,193,7,0.85);
+            color: #000;
+            font-size: 11px;
+            font-weight: bold;
+            padding: 2px 8px;
+            border-radius: 4px;
+            z-index: 20;
+        }
+
+        /* Ícono de mic silenciado sobre la caja de video */
+        .mic-off-icono {
+            position: absolute !important;
+            bottom: 10px !important;
+            right: 10px !important;
+            font-size: 14px !important;
+            background: rgba(220,53,69,0.85) !important;
+            width: 28px !important;
+            height: 28px !important;
+            border-radius: 50% !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            z-index: 9999 !important;
+            padding: 0 !important;
+        }
     </style>
 </head>
 <body>
@@ -123,7 +182,12 @@
             <div id="estadoConexion" class="estado">📡 Conectado al servidor...</div>
         </div>
         <div class="seccion-videos">
-            <button id="btnCamara" style="background:#28a745;color:white;margin-bottom:15px;padding:8px 16px;border:none;border-radius:4px;cursor:pointer;font-weight:bold;" onclick="controlarCamaraLocal()">Encender Cámara/Audio</button>
+            <div class="barra-controles">
+                <button id="btnCamara" class="btn-control" style="background:#28a745;" onclick="controlarCamaraLocal()">📹 Encender Cámara</button>
+                <button id="btnMic" class="btn-control" style="background:#6c757d;" onclick="alternarMicrofono()" disabled>🎙️ Silenciar Mic</button>
+                <button id="btnPantalla" class="btn-control" style="background:#6f42c1;" onclick="alternarPantalla()">🖥️ Compartir Pantalla</button>
+                <button id="btnFijar" class="btn-control" style="background:#fd7e14;" onclick="fijarCamara()" disabled>📌 Fijar Cámara</button>
+            </div>
             <div class="grid-videos" id="salaVideos">
                 <div class="video-box" id="box-local">
                     <video id="localVideo" autoplay playsinline muted></video>
@@ -329,7 +393,7 @@ function controlarCamaraLocal() {
         miStream.getVideoTracks().forEach(track => track.enabled = false);
         miStream.getAudioTracks().forEach(track => track.enabled = false);
 
-        btn.innerText = "Encender Cámara/Audio";
+        btn.innerText = "📹 Encender Cámara";
         btn.style.background = "#28a745";
 
         if (connData && connData.open) {
@@ -343,7 +407,7 @@ function controlarCamaraLocal() {
         miStream.getVideoTracks().forEach(track => track.enabled = true);
         miStream.getAudioTracks().forEach(track => track.enabled = true);
 
-        btn.innerText = "Apagar Cámara/Audio";
+        btn.innerText = "📹 Apagar Cámara";
         btn.style.background = "#dc3545";
 
         if (connData && connData.open) {
@@ -361,8 +425,12 @@ function controlarCamaraLocal() {
         lv.srcObject = stream;
         lv.style.transform = "scaleX(-1)";
 
-        btn.innerText = "Apagar Cámara/Audio";
+        btn.innerText = "📹 Apagar Cámara";
         btn.style.background = "#dc3545";
+
+        // Habilitar botones que dependen de tener stream activo
+        document.getElementById("btnMic").disabled = false;
+        document.getElementById("btnFijar").disabled = false;
 
         // Si ya hay una llamada WebRTC activa (creada con MediaStream vacío al ser admitido)
         if (callVid && callVid.peerConnection) {
@@ -517,8 +585,174 @@ function dibujarManoEnVideo(idContenedor, mostrar) {
     
 // ── SALIR ─────────────────────────────────────────────────────
 function abandonarSala() {
+    if (streamPantalla) detenerPantalla();
     if (peer) peer.destroy();
     window.location.href = "index.html";
+}
+
+// ── MICRÓFONO ─────────────────────────────────────────────────
+function alternarMicrofono() {
+    if (!miStream) return;
+    const btn = document.getElementById("btnMic");
+    const audioTrack = miStream.getAudioTracks()[0];
+    if (!audioTrack) return;
+
+    audioTrack.enabled = !audioTrack.enabled;
+
+    if (audioTrack.enabled) {
+        btn.innerText = "🎙️ Silenciar Mic";
+        btn.style.background = "#6c757d";
+        // Quitar ícono de mic apagado de la caja local
+        const micIcon = document.querySelector("#box-local .mic-off-icono");
+        if (micIcon) micIcon.remove();
+    } else {
+        btn.innerText = "🔇 Activar Mic";
+        btn.style.background = "#dc3545";
+        // Mostrar ícono de mic apagado sobre la caja local
+        const box = document.getElementById("box-local");
+        if (box && !box.querySelector(".mic-off-icono")) {
+            const icon = document.createElement("span");
+            icon.className = "mic-off-icono";
+            icon.innerText = "🔇";
+            box.appendChild(icon);
+        }
+    }
+}
+
+// ── FIJAR CÁMARA ──────────────────────────────────────────────
+let camaraFijadaId = null;
+
+function fijarCamara() {
+    const btn = document.getElementById("btnFijar");
+
+    // Si ya hay una fijada → desfijar
+    if (camaraFijadaId) {
+        const boxAnterior = document.getElementById(camaraFijadaId);
+        if (boxAnterior) boxAnterior.classList.remove("fijado");
+        camaraFijadaId = null;
+        btn.innerText = "📌 Fijar Cámara";
+        btn.style.background = "#fd7e14";
+        return;
+    }
+
+    // Pedir al usuario qué cámara fijar con un menú simple
+    const boxes = document.querySelectorAll(".video-box");
+    if (boxes.length === 0) return;
+
+    // Si solo hay una caja distinta de local, fijarla directamente
+    const opciones = Array.from(boxes).filter(b => b.id !== "box-local");
+    if (opciones.length === 1) {
+        opciones[0].classList.add("fijado");
+        camaraFijadaId = opciones[0].id;
+        btn.innerText = "📌 Desfijar";
+        btn.style.background = "#dc3545";
+        return;
+    }
+
+    // Si hay varias: fijar la propia cámara local
+    const boxLocal = document.getElementById("box-local");
+    if (boxLocal) {
+        boxLocal.classList.add("fijado");
+        camaraFijadaId = "box-local";
+        btn.innerText = "📌 Desfijar";
+        btn.style.background = "#dc3545";
+    }
+}
+
+// También permitir fijar haciendo doble clic sobre cualquier caja de video
+document.addEventListener("dblclick", (e) => {
+    const box = e.target.closest(".video-box");
+    if (!box) return;
+
+    const btn = document.getElementById("btnFijar");
+
+    // Si la caja clicada ya está fijada → desfijar
+    if (box.classList.contains("fijado")) {
+        box.classList.remove("fijado");
+        camaraFijadaId = null;
+        if (btn) { btn.innerText = "📌 Fijar Cámara"; btn.style.background = "#fd7e14"; }
+        return;
+    }
+
+    // Desfijar la anterior si existe
+    if (camaraFijadaId) {
+        const anterior = document.getElementById(camaraFijadaId);
+        if (anterior) anterior.classList.remove("fijado");
+    }
+
+    box.classList.add("fijado");
+    camaraFijadaId = box.id;
+    if (btn) { btn.innerText = "📌 Desfijar"; btn.style.background = "#dc3545"; }
+});
+
+// ── COMPARTIR PANTALLA ────────────────────────────────────────
+let streamPantalla = null;
+let callPantalla   = null;
+
+async function alternarPantalla() {
+    const btn = document.getElementById("btnPantalla");
+
+    // Si ya está compartiendo → detener
+    if (streamPantalla) {
+        detenerPantalla();
+        return;
+    }
+
+    try {
+        streamPantalla = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+
+        // Mostrar la pantalla en una caja propia
+        crearBox("pantalla-local");
+        const vBox = document.getElementById("video-pantalla-local");
+        if (vBox) {
+            vBox.srcObject = streamPantalla;
+            // Cambiar etiqueta
+            const lbl = document.querySelector("#box-pantalla-local span");
+            if (lbl) lbl.innerText = "🖥️ Tu Pantalla";
+        }
+
+        // Enviar la pantalla al anfitrión como una llamada separada
+        callPantalla = peer.call(peerIdAnfitrion, streamPantalla, {
+            metadata: { nombre: miNombre + " [Pantalla]" }
+        });
+
+        callPantalla.on("stream", () => {}); // requerido para que PeerJS procese la conexión
+
+        // Si el usuario detiene desde el navegador (botón "Dejar de compartir")
+        streamPantalla.getVideoTracks()[0].onended = () => detenerPantalla();
+
+        btn.innerText = "🛑 Dejar de Compartir";
+        btn.style.background = "#dc3545";
+
+        if (connData && connData.open) {
+            connData.send({ tipo: "pantalla_iniciada", de: miNombre });
+        }
+
+    } catch (err) {
+        if (err.name !== "NotAllowedError") {
+            console.error("Error compartir pantalla:", err);
+            alert("No se pudo compartir la pantalla.");
+        }
+        streamPantalla = null;
+    }
+}
+
+function detenerPantalla() {
+    if (streamPantalla) {
+        streamPantalla.getTracks().forEach(t => t.stop());
+        streamPantalla = null;
+    }
+    if (callPantalla) { callPantalla.close(); callPantalla = null; }
+
+    const box = document.getElementById("box-pantalla-local");
+    if (box) box.remove();
+
+    const btn = document.getElementById("btnPantalla");
+    if (btn) { btn.innerText = "🖥️ Compartir Pantalla"; btn.style.background = "#6f42c1"; }
+
+    if (connData && connData.open) {
+        connData.send({ tipo: "pantalla_detenida", de: miNombre });
+    }
 }
 </script>
 </body>
