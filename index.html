@@ -1,15 +1,97 @@
-        .btn-unirse { background-color: #0e71eb; }
-        .icono-btn { font-size: 32px; }
-        .form-unirse { margin-top: 20px; display: none; background: #3a3a3a; padding: 15px; border-radius: 8px; }
-        .campo { margin-bottom: 12px; }
-        input[type="text"] { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #555; background: #333; color: white; border-radius: 4px; }
-        .btn-entrar { background-color: #0e71eb; color: white; padding: 10px; border: none; width: 100%; font-weight: bold; border-radius: 4px; cursor: pointer; }
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>ZoomOf Workspace</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            padding: 0; 
+            background-color: #1a1a1a; 
+            color: #fff; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            min-height: 100vh; 
+        }
+        .menu-inicio { 
+            text-align: center; 
+            background: #2a2a2a; 
+            padding: 40px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.4); 
+            max-width: 450px; 
+            width: 100%; 
+            box-sizing: border-box;
+        }
+        .menu-inicio h2 { margin-top: 0; font-size: 26px; color: #fff; }
+        .menu-inicio p { color: #aaa; font-size: 14px; margin-bottom: 25px; }
+        
+        .grid-botones-zoom { display: flex; gap: 15px; justify-content: center; margin-bottom: 20px; }
+        
+        .btn-zoom { 
+            flex: 1;
+            background-color: #2a2a2a; 
+            color: white; 
+            border: 2px solid #444; 
+            padding: 15px 10px; 
+            border-radius: 10px; 
+            cursor: pointer; 
+            font-weight: bold; 
+            font-size: 14px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+        }
+        .btn-zoom:hover { transform: translateY(-2px); border-color: #0e71eb; background-color: #333; }
+        .btn-nueva { border-color: #28a745; }
+        .btn-nueva:hover { border-color: #218838; background-color: #222; }
+        .btn-unirse { border-color: #0e71eb; }
+        .btn-unirse:hover { border-color: #0b5cb8; background-color: #222; }
+        
+        .icono-btn { font-size: 28px; }
+        
+        .form-unirse { margin-top: 20px; background: #222; padding: 20px; border-radius: 8px; border: 1px solid #444; text-align: left; }
+        .campo { margin-bottom: 15px; }
+        
+        input[type="text"] { 
+            width: 100%; 
+            padding: 10px; 
+            box-sizing: border-box; 
+            border: 1px solid #555; 
+            background: #333; 
+            color: white; 
+            border-radius: 6px; 
+            font-size: 14px;
+        }
+        input[type="text"]:focus { border-color: #0e71eb; outline: none; }
+        
+        .btn-entrar { 
+            background-color: #0e71eb; 
+            color: white; 
+            padding: 12px; 
+            border: none; 
+            width: 100%; 
+            font-weight: bold; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 14px; 
+            margin-top: 10px;
+            transition: background 0.2s, transform 0.1s;
+        }
+        .btn-entrar:hover { background-color: #0b5cb8; }
+        .btn-entrar:active { transform: scale(0.98); }
     </style>
 </head>
 <body>
+
     <div class="menu-inicio">
         <h2>ZoomOf Workspace</h2>
         <p>Elige una opción para ingresar a la plataforma de video</p>
+        
         <div class="grid-botones-zoom">
             <button class="btn-zoom btn-nueva" onclick="configurarForm('crear')">
                 <span class="icono-btn">📹</span>
@@ -20,43 +102,44 @@
                 <span>Unirse</span>
             </button>
         </div>
-        <div id="seccionCampos" class="form-unirse">
+
+        <div id="seccionCampos" class="form-unirse" style="display: none;">
             <div class="campo">
                 <input type="text" id="inputNombre" placeholder="Tu Nombre / Apodo...">
             </div>
-            <div class="campo" id="capaSalaID" style="display:none;">
+            <div class="campo" id="capasaSalaID" style="display:none;">
                 <input type="text" id="inputSalaID" placeholder="ID de la reunión (Ej: sala-xxxx)...">
             </div>
             <button class="btn-entrar" onclick="procesarEnvio()">Ingresar de forma segura</button>
         </div>
     </div>
 
-<script>
-    var modoSeleccionado = "";
+    <script>
+        var modoSeleccionado = "";
 
-    function configurarForm(accion) {
-        modoSeleccionado = accion;
-        document.getElementById("seccionCampos").style.display = "block";
-        document.getElementById("capaSalaID").style.display = accion === "unirse" ? "block" : "none";
-        document.getElementById("inputNombre").focus();
-    }
-
-    function procesarEnvio() {
-        var nombre = document.getElementById("inputNombre").value.trim();
-        if (nombre === "") { alert("Por favor, introduce tu nombre."); return; }
-        var nombreLimpio = encodeURIComponent(nombre);
-
-        if (modoSeleccionado === "crear") {
-            var timestamp = new Date().getTime().toString().substring(8);
-            var randomNum = Math.floor(1000 + Math.random() * 9000);
-            var codigoUnico = "sala-" + timestamp + randomNum;
-            window.location.replace("crearreunion.html?id=" + codigoUnico + "&nombre=" + nombreLimpio);
-        } else {
-            var salaID = document.getElementById("inputSalaID").value.trim();
-            if (salaID === "") { alert("Debes colocar el ID de la reunión."); return; }
-            window.location.replace("unirsereunion.html?id=" + encodeURIComponent(salaID) + "&nombre=" + nombreLimpio);
+        function configurarForm(accion) {
+            modoSeleccionado = accion;
+            document.getElementById("seccionCampos").style.display = "block";
+            document.getElementById("capasaSalaID").style.display = accion === "unirse" ? "block" : "none";
+            document.getElementById("inputNombre").focus();
         }
-    }
-</script>
+
+        function procesarEnvio() {
+            var nombre = document.getElementById("inputNombre").value.trim();
+            if (nombre === "") { alert("Por favor, introduce tu nombre."); return; }
+            var nombreLimpio = encodeURIComponent(nombre);
+
+            if (modoSeleccionado === "crear") {
+                var timestamp = new Date().getTime().toString().substring(8);
+                var randomNum = Math.floor(1000 + Math.random() * 9000);
+                var codigoUnico = "sala-" + timestamp + randomNum;
+                window.location.replace("crearreunion.html?id=" + codigoUnico + "&nombre=" + nombreLimpio);
+            } else {
+                var salaID = document.getElementById("inputsalaID") ? document.getElementById("inputsalaID").value.trim() : document.getElementById("inputSalaID").value.trim();
+                if (salaID === "") { alert("Debes colocar el ID de la reunión."); return; }
+                window.location.replace("unirsereunion.html?id=" + encodeURIComponent(salaID) + "&nombre=" + nombreLimpio);
+            }
+        }
+    </script>
 </body>
 </html>
