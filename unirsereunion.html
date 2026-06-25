@@ -253,28 +253,49 @@ function conectarConAnfitrion() {
 }
 
 // ── LLAMADA DE VIDEO ──────────────────────────────────────────
-
 function iniciarLlamadaVideo() {
-
     crearBox("anfitrion");
 
-    callVid = peer.call(peerIdAnfitrion, miStream || new MediaStream(), {
-        metadata: { nombre: miNombre }
-    });
+    // Si el stream no está listo todavía (getUserMedia aún no terminó),
+    // esperar hasta 3 segundos antes de llamar con lo que haya
+    const hacerLlamada = (streamParaLlamar) => {
+        callVid = peer.call(peerIdAnfitrion, streamParaLlamar, {
+            metadata: { nombre: miNombre }
+        });
 
-    callVid.on("stream", (remoteStream) => {
-        ultimoStreamAnfitrion = remoteStream; 
-        const v = document.getElementById("video-anfitrion");
-        if (v) {
-            v.srcObject = remoteStream;
-            v.play().catch(e => console.log("Error auto-play anfitrión: ", e));
-        }
-    });
+        callVid.on("stream", (remoteStream) => {
+            ultimoStreamAnfitrion = remoteStream;
+            const v = document.getElementById("video-anfitrion");
+            if (v) {
+                v.srcObject = remoteStream;
+                v.play().catch(e => console.log("Error auto-play anfitrión:", e));
+            }
+        });
 
-    callVid.on("close", () => {
-        const el = document.getElementById("box-anfitrion");
-        if (el) el.remove();
-    });
+        callVid.on("close", () => {
+            const el = document.getElementById("box-anfitrion");
+            if (el) el.remove();
+        });
+    };
+
+    if (miStream) {
+        // Stream ya listo → llamar de inmediato
+        hacerLlamada(miStream);
+    } else {
+        // Stream aún no disponible → esperar hasta 3 seg con reintentos cada 100ms
+        let intentos = 0;
+        const esperar = setInterval(() => {
+            intentos++;
+            if (miStream) {
+                clearInterval(esperar);
+                hacerLlamada(miStream);
+            } else if (intentos >= 30) {
+                // Después de 3 seg sin stream, llamar con MediaStream vacío igual
+                clearInterval(esperar);
+                hacerLlamada(new MediaStream());
+            }
+        }, 100);
+    }
 }
 
 // ── ACTIVAR SALA ──────────────────────────────────────────────
@@ -303,12 +324,10 @@ function crearBox(nombre) {
 function controlarCamaraLocal() {
     const btn = document.getElementById("btnCamara");
 
-    if (miStream) {
-        miStream.getTracks().forEach(track => track.stop());
-
-        miStream = null;
-
-        document.getElementById("localVideo").srcObject = null;
+    // SI LA CÁMARA ESTÁ ACTIVA → PAUSARLA (sin destruir el stream ni la llamada)
+    if (miStream && miStream.getVideoTracks()[0] && miStream.getVideoTracks()[0].enabled === true) {
+        miStream.getVideoTracks().forEach(track => track.enabled = false);
+        miStream.getAudioTracks().forEach(track => track.enabled = false);
 
         btn.innerText = "Encender Cámara/Audio";
         btn.style.background = "#28a745";
@@ -316,16 +335,26 @@ function controlarCamaraLocal() {
         if (connData && connData.open) {
             connData.send({ tipo: "camara_apagada" });
         }
-
         return;
     }
 
-    navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-    })
-    .then(stream => {
+    // SI EL STREAM EXISTE PERO ESTABA PAUSADO → REACTIVARLO SIN NUEVA LLAMADA
+    if (miStream && miStream.getVideoTracks()[0] && miStream.getVideoTracks()[0].enabled === false) {
+        miStream.getVideoTracks().forEach(track => track.enabled = true);
+        miStream.getAudioTracks().forEach(track => track.enabled = true);
 
+        btn.innerText = "Apagar Cámara/Audio";
+        btn.style.background = "#dc3545";
+
+        if (connData && connData.open) {
+            connData.send({ tipo: "camara_encendida" });
+        }
+        return;
+    }
+
+    // PRIMER ENCENDIDO → pedir permisos y enviar video al anfitrión
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    .then(stream => {
         miStream = stream;
 
         const lv = document.getElementById("localVideo");
@@ -335,28 +364,61 @@ function controlarCamaraLocal() {
         btn.innerText = "Apagar Cámara/Audio";
         btn.style.background = "#dc3545";
 
-        if (callVid) {
-            callVid.close();
+        // Si ya hay una llamada WebRTC activa (creada con MediaStream vacío al ser admitido)
+        if (callVid && callVid.peerConnection) {
+            try {
+                const pc = callVid.peerConnection;
+                const senders = pc.getSenders();
+
+                // Buscar senders con track existente para reemplazar
+                const senderVideo = senders.find(s => s.track && s.track.kind === "video");
+                const senderAudio = senders.find(s => s.track && s.track.kind === "audio");
+
+                if (senderVideo) {
+                    senderVideo.replaceTrack(stream.getVideoTracks()[0]);
+                } else {
+                    // No había track de video → agregar directamente
+                    pc.addTrack(stream.getVideoTracks()[0], stream);
+                }
+
+                if (senderAudio) {
+                    senderAudio.replaceTrack(stream.getAudioTracks()[0]);
+                } else {
+                    pc.addTrack(stream.getAudioTracks()[0], stream);
+                }
+
+                if (connData && connData.open) {
+                    connData.send({ tipo: "camara_encendida" });
+                }
+                return;
+            } catch (e) {
+                console.warn("No se pudo inyectar tracks, rehaciendo llamada:", e);
+                callVid.close();
+                callVid = null;
+            }
         }
 
+        // Sin llamada previa → crear una nueva desde cero
         callVid = peer.call(peerIdAnfitrion, miStream, {
-            metadata: {
-                nombre: miNombre
-            }
+            metadata: { nombre: miNombre }
         });
+
+        // Asegurarse de que la caja del anfitrión existe
+        crearBox("anfitrion");
 
         callVid.on("stream", remoteStream => {
-
-            crearBox("anfitrion");
-
-            const videoHost =
-                document.getElementById("video-anfitrion");
-
+            ultimoStreamAnfitrion = remoteStream;
+            const videoHost = document.getElementById("video-anfitrion");
             if (videoHost) {
                 videoHost.srcObject = remoteStream;
+                videoHost.play().catch(e => console.log("Autoplay:", e));
             }
         });
 
+        callVid.on("close", () => {
+            const el = document.getElementById("box-anfitrion");
+            if (el) el.remove();
+        });
     })
     .catch(err => {
         console.error(err);
