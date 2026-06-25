@@ -184,7 +184,7 @@
         <div class="seccion-videos">
             <div class="barra-controles">
                 <button id="btnCamara" class="btn-control" style="background:#28a745;" onclick="controlarCamaraLocal()">📹 Encender Cámara</button>
-                <button id="btnMic" class="btn-control" style="background:#6c757d;" onclick="alternarMicrofono()" disabled>🎙️ Silenciar Mic</button>
+                <button id="btnMic" class="btn-control" style="background:#6c757d;" onclick="alternarMicrofono()" >🎙️ Silenciar Mic</button>
                 <button id="btnPantalla" class="btn-control" style="background:#6f42c1;" onclick="alternarPantalla()">🖥️ Compartir Pantalla</button>
                 <button id="btnFijar" class="btn-control" style="background:#fd7e14;" onclick="fijarCamara()" disabled>📌 Fijar Cámara</button>
             </div>
@@ -228,7 +228,7 @@ window.addEventListener("load", () => {
     const miPeerId = "zoomof-part-" + Date.now() + "-" + Math.floor(Math.random() * 9999);
     peer = new Peer(miPeerId);
 
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    navigator.mediaDevices.getUserMedia({ audio: true })
         .then(stream => {
             miStream = stream; 
             
@@ -391,7 +391,6 @@ function controlarCamaraLocal() {
     // SI LA CÁMARA ESTÁ ACTIVA → PAUSARLA (sin destruir el stream ni la llamada)
     if (miStream && miStream.getVideoTracks()[0] && miStream.getVideoTracks()[0].enabled === true) {
         miStream.getVideoTracks().forEach(track => track.enabled = false);
-        miStream.getAudioTracks().forEach(track => track.enabled = false);
 
         btn.innerText = "📹 Encender Cámara";
         btn.style.background = "#28a745";
@@ -405,7 +404,6 @@ function controlarCamaraLocal() {
     // SI EL STREAM EXISTE PERO ESTABA PAUSADO → REACTIVARLO SIN NUEVA LLAMADA
     if (miStream && miStream.getVideoTracks()[0] && miStream.getVideoTracks()[0].enabled === false) {
         miStream.getVideoTracks().forEach(track => track.enabled = true);
-        miStream.getAudioTracks().forEach(track => track.enabled = true);
 
         btn.innerText = "📹 Apagar Cámara";
         btn.style.background = "#dc3545";
@@ -592,9 +590,28 @@ function abandonarSala() {
 
 // ── MICRÓFONO ─────────────────────────────────────────────────
 function alternarMicrofono() {
-    if (!miStream) return;
+
     const btn = document.getElementById("btnMic");
+
+    if (!miStream) {
+        navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+
+            if (!miStream) {
+                miStream = stream;
+            } else {
+                stream.getAudioTracks().forEach(track => {
+                    miStream.addTrack(track);
+                });
+            }
+
+            alternarMicrofono();
+        });
+        return;
+    }
+
     const audioTrack = miStream.getAudioTracks()[0];
+
     if (!audioTrack) return;
 
     audioTrack.enabled = !audioTrack.enabled;
@@ -602,14 +619,17 @@ function alternarMicrofono() {
     if (audioTrack.enabled) {
         btn.innerText = "🎙️ Silenciar Mic";
         btn.style.background = "#6c757d";
-        // Quitar ícono de mic apagado de la caja local
+
         const micIcon = document.querySelector("#box-local .mic-off-icono");
         if (micIcon) micIcon.remove();
+
     } else {
+
         btn.innerText = "🔇 Activar Mic";
         btn.style.background = "#dc3545";
-        // Mostrar ícono de mic apagado sobre la caja local
+
         const box = document.getElementById("box-local");
+
         if (box && !box.querySelector(".mic-off-icono")) {
             const icon = document.createElement("span");
             icon.className = "mic-off-icono";
@@ -618,7 +638,6 @@ function alternarMicrofono() {
         }
     }
 }
-
 // ── FIJAR CÁMARA ──────────────────────────────────────────────
 let camaraFijadaId = null;
 
