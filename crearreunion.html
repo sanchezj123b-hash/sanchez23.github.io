@@ -6,9 +6,9 @@
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #1a1a1a; color: #fff; }
         .barra-superior { background: #222; padding: 10px 20px; border-radius: 6px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid #e74c3c; flex-wrap: wrap; gap: 8px; }
-        .sala-espera-contenedor { background: #3a2e12; border: 2px solid #d39e00; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+       .sala-espera-contenedor { background: #1e1b15; border: 2px solid #ffb300; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
         .lista-espera { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; min-height: 40px; }
-        .tarjeta-espera { background: #222; padding: 10px 15px; border-radius: 6px; border: 1px solid #d39e00; display: flex; align-items: center; gap: 10px; }
+        .tarjeta-espera { background: #222; padding: 10px 15px; border-radius: 6px; border: 1px solid #ffb300; display: flex; align-items: center; gap: 10px; }
         .contenedor-principal { display: flex; gap: 20px; flex-wrap: wrap; }
         .seccion-chat { flex: 1; min-width: 220px; background: #2a2a2a; padding: 15px; border-radius: 8px; }
         #mensajes { height: 250px; border: 1px solid #444; overflow-y: auto; padding: 10px; background: #222; margin-bottom: 10px; }
@@ -19,6 +19,81 @@
         .video-box span { position: absolute; bottom: 5px; left: 5px; background: rgba(0,0,0,0.6); padding: 2px 6px; font-size: 12px; border-radius: 3px; z-index: 10; }
         input[type="text"] { padding: 8px; background: #333; color: white; border: none; border-radius: 4px; }
         .estado { font-size: 12px; color: #888; margin-top: 5px; }
+        .video-box { 
+            position: relative; 
+            background: #1e1e1e; 
+            border-radius: 12px; 
+            overflow: hidden; 
+            height: 180px; 
+            border: 1px solid #333; 
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3); 
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+        
+        .video-box:hover {
+            transform: translateY(-2px); 
+            border-color: #0e71eb; 
+        }
+
+        .video-box span { 
+            position: absolute; 
+            bottom: 10px; 
+            left: 10px; 
+            background: rgba(15, 15, 15, 0.75); 
+            backdrop-filter: blur(4px); 
+            padding: 4px 10px; 
+            font-size: 12px; 
+            font-weight: bold;
+            border-radius: 6px; 
+            z-index: 10; 
+        }
+
+        button {
+            transition: background-color 0.2s ease, transform 0.1s ease;
+            font-weight: bold;
+        }
+        button:hover {
+            filter: brightness(1.15); 
+            cursor: pointer;
+        }
+        button:active {
+            transform: scale(0.98); 
+        }
+
+        /* Animación para que el emoji suba y desaparezca de la pantalla */
+        @keyframes flotarYDesvanecer {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            15% { opacity: 1; transform: translate(-50%, -70%) scale(1.2); }
+            100% { transform: translate(-50%, -150%) scale(1); opacity: 0; }
+        }
+
+        .emoji-flotante {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            font-size: 50px;
+            z-index: 100;
+            pointer-events: none;
+            animation: flotarYDesvanecer 2s forwards ease-out;
+        }
+
+        .mano-icono {
+    position: absolute !important;
+    top: 10px !important;
+    right: 10px !important;
+    font-size: 16px !important;
+    background: rgba(0, 0, 0, 0.4) !important; 
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 50% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;
+    z-index: 9999 !important;
+    padding: 0 !important;
+}
+        
     </style>
 </head>
 <body>
@@ -39,6 +114,13 @@
 <div class="contenedor-principal">
     <div class="seccion-chat">
         <div id="mensajes"></div>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px; justify-content: center; background: #1f1f1f; padding: 5px; border-radius: 6px;">
+            <button style="background: none; border: none; font-size: 20px; cursor: pointer;" onclick="enviarReaccion('👏')">👏</button>
+            <button style="background: none; border: none; font-size: 20px; cursor: pointer;" onclick="enviarReaccion('❤️')">❤️</button>
+            <button style="background: none; border: none; font-size: 20px; cursor: pointer;" onclick="enviarReaccion('😂')">😂</button>
+            <button style="background: none; border: none; font-size: 20px; cursor: pointer;" onclick="enviarReaccion('😮')">😮</button>
+            <button style="background: #ffc107; border: none; font-size: 13px; color: #000; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-weight: bold;" id="btnLevantarMano" onclick="alternarMano()">✋ Levantar Mano</button>
+        </div>
         <div style="display:flex;gap:5px;">
             <input type="text" id="txtMensaje" placeholder="Escribe un mensaje..." style="width:100%;">
             <button style="background:#0e71eb;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;" onclick="enviarMensaje()">Enviar</button>
@@ -154,11 +236,17 @@ function manejarDatos(nombre, data) {
         case "mensaje":
             mostrarMensaje(nombre, data.mensaje);
             break;
-        case "camara_apagada": {
+        case "camara_apagada": 
             const v = document.getElementById("video-" + nombre);
             if (v) v.srcObject = null;
             break;
-        }
+        case "reaccion":
+                // Si el ID de tus cajas de video es "box-Nombre", usamos "box-" + nombre
+                mostrarEmojiEnPantalla("box-" + nombre, data.emoji);
+                break;
+        case "mano_estado":
+                dibujarManoEnVideo("box-" + data.de, data.estado);
+                break;   
     }
 }
 
@@ -245,93 +333,66 @@ function destruirConexion(nombre) {
 
 // ── CÁMARA ────────────────────────────────────────────────────
 function controlarCamaraLocal() {
-
     const btn = document.getElementById("btnCamara");
 
-    if (miStream) {
-
-        miStream.getTracks().forEach(t => t.stop());
-
-        miStream = null;
-
-        document.getElementById("localVideo").srcObject = null;
-
+    // 1. SI LA CÁMARA ESTÁ ACTIVA, LA PAUSAMOS DE FORMA SEGURA (MUTE)
+    if (miStream && miStream.getVideoTracks()[0] && miStream.getVideoTracks()[0].enabled === true) {
+        miStream.getVideoTracks().forEach(track => track.enabled = false); // Oculta el video sin romper el canal PeerJS
+        
         btn.innerText = "Encender Cámara/Audio";
-        btn.style.background = "#28a745";
+        btn.style.background = "#28a745"; // Verde
 
-        enviarATodos({
-            tipo: "camara_apagada"
-        });
-
+        enviarATodos({ tipo: "camara_apagada" }); // Le avisa al participante
         return;
     }
 
+    // 2. SI LA CÁMARA YA EXISTÍA PERO ESTABA PAUSADA, LA REACTIVAMOS AL INSTANTE
+    if (miStream && miStream.getVideoTracks()[0] && miStream.getVideoTracks()[0].enabled === false) {
+        miStream.getVideoTracks().forEach(track => track.enabled = true); // Reactiva el video
+        
+        btn.innerText = "Apagar Cámara/Audio";
+        btn.style.background = "#dc3545"; // Rojo
+
+        enviarATodos({ tipo: "camara_encendida" }); // Evento para que el participante restaure el video
+        return;
+    }
+
+    // 3. PRIMER ENCENDIDO DE LA REUNIÓN (Pedir permisos por primera vez)
     navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true
     })
     .then(stream => {
-
         miStream = stream;
-
         const lv = document.getElementById("localVideo");
-
-        lv.srcObject = stream;
-        lv.style.transform = "scaleX(-1)";
+        if (lv) {
+            lv.srcObject = stream;
+            lv.style.transform = "scaleX(-1)";
+        }
 
         btn.innerText = "Apagar Cámara/Audio";
         btn.style.background = "#dc3545";
 
+        // Inyecta el stream inicial en las conexiones activas
         Object.values(conexiones).forEach(c => {
-
             if (!c.call) return;
-
             try {
-
-                c.call.peerConnection
-                    .getSenders()
-                    .forEach(sender => {
-
-                        if (!sender.track) return;
-
-                        if (
-                            sender.track.kind === "video" &&
-                            stream.getVideoTracks()[0]
-                        ) {
-                            sender.replaceTrack(
-                                stream.getVideoTracks()[0]
-                            );
-                        }
-
-                        if (
-                            sender.track.kind === "audio" &&
-                            stream.getAudioTracks()[0]
-                        ) {
-                            sender.replaceTrack(
-                                stream.getAudioTracks()[0]
-                            );
-                        }
-
-                    });
-
+                c.call.peerConnection.getSenders().forEach(sender => {
+                    if (!sender.track) return;
+                    if (sender.track.kind === "video" && stream.getVideoTracks()[0]) {
+                        sender.replaceTrack(stream.getVideoTracks()[0]);
+                    }
+                });
             } catch (e) {
-                console.error(e);
+                console.error("Error al inyectar track:", e);
             }
-
         });
-
     })
     .catch(err => {
-
         console.error(err);
-
-        alert(
-            "Verifica permisos de cámara y micrófono."
-        );
-
+        alert("Verifica permisos de cámara y micrófono.");
     });
 }
-
 // ── CHAT ──────────────────────────────────────────────────────
 function enviarATodos(data) {
     Object.values(conexiones).forEach(c => {
@@ -359,6 +420,74 @@ function mostrarMensaje(nombre, texto) {
     c.appendChild(p); c.scrollTop = c.scrollHeight;
 }
 
+// ====== SISTEMA DE REACCIONES Y MANO LEVANTADA ======
+
+function enviarReaccion(emoji) {
+    // 1. Lo enviamos a todos los participantes conectados
+    enviarATodos({ tipo: "reaccion", de: miNombre, emoji: emoji });
+    // 2. Lo mostramos en nuestra propia pantalla
+    mostrarEmojiEnPantalla("box-local", emoji);
+}
+
+function alternarMano() {
+    const btn = document.getElementById("btnLevantarMano");
+    if (!btn) return;
+
+    const yaLevanto = btn.classList.toggle("mano-activa");
+    const datosMano = { tipo: "mano_estado", de: "Anfitrión", estado: yaLevanto };
+    
+    // 🌟 ENVIAR A TODOS LOS CONECTADOS 
+    if (typeof conexiones !== "undefined" && Array.isArray(conexiones)) {
+        conexiones.forEach(c => { if(c.open) c.send(datosMano); });
+    } else if (typeof enviarATodos === "function") {
+        enviarATodos(datosMano);
+    }
+
+    if (yaLevanto) {
+        btn.innerText = "👇 Bajar Mano";
+        btn.style.background = "#dc3545";
+        btn.style.color = "white";
+        dibujarManoEnVideo("box-local", true);
+    } else {
+        btn.innerText = "✋ Levantar Mano";
+        btn.style.background = "#ffc107";
+        btn.style.color = "#000";
+        dibujarManoEnVideo("box-local", false);
+    }
+}
+
+function mostrarEmojiEnPantalla(idContenedorVideo, emoji) {
+    const contenedor = document.getElementById(idContenedorVideo);
+    if (!contenedor) return;
+
+    const divEmoji = document.createElement("div");
+    divEmoji.className = "emoji-flotante";
+    divEmoji.innerText = emoji;
+
+    contenedor.appendChild(divEmoji);
+
+    // Lo eliminamos automáticamente en 2 segundos cuando termine la animación CSS
+    setTimeout(() => { divEmoji.remove(); }, 2000);
+}
+
+function dibujarManoEnVideo(idContenedorVideo, mostrar) {
+    const contenedor = document.getElementById(idContenedorVideo);
+    if (!contenedor) return;
+
+    // Buscamos si ya tiene un icono de mano dibujado
+    let manoExistente = contenedor.querySelector(".mano-icono");
+
+    if (mostrar) {
+        if (!manoExistente) {
+            const spanMano = document.createElement("span");
+            spanMano.className = "mano-icono";
+            spanMano.innerText = "✋";
+            contenedor.appendChild(spanMano);
+        }
+    } else {
+        if (manoExistente) manoExistente.remove();
+    }
+}    
 // ── CERRAR SALA ───────────────────────────────────────────────
 function cerrarSalaForzada() {
     enviarATodos({ tipo: "sala_cerrada" });
