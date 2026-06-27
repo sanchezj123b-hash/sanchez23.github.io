@@ -220,6 +220,8 @@ let peer     = null;
 let connData = null;   // DataConnection con el anfitrión
 let callVid  = null;   // MediaConnection con el anfitrión
 let miStream = null;
+let miVideoTrack = null;  // track de video activo (independiente)
+let miAudioTrack = null;  // track de audio activo (independiente)
 let admitido = false;
 let ultimoStreamAnfitrion = null;
 
@@ -229,22 +231,8 @@ window.addEventListener("load", () => {
     const miPeerId = "zoomof-part-" + Date.now() + "-" + Math.floor(Math.random() * 9999);
     peer = new Peer(miPeerId);
 
-    navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(stream => {
-            miStream = stream; 
-            
-            miStream.getVideoTracks().forEach(track => track.enabled = false);
-            miStream.getAudioTracks().forEach(track => track.enabled = false);
-            
-            const lv = document.getElementById("localVideo");
-            if (lv) {
-                lv.srcObject = stream;
-                lv.style.transform = "scaleX(-1)";
-            }
-        })
-        .catch(err => {
-            console.error("No se pudo inicializar la cámara al cargar: ", err);
-        });
+    // No pedimos ningún track al inicio: el usuario los activa con los botones
+    // Esto evita que tracks "pre-pedidos" queden en estado inconsistente
 
     peer.on("open", () => {
         document.getElementById("estadoEspera").innerText = "✔ Conectado. Llamando al anfitrión...";
@@ -398,62 +386,62 @@ function actualizarBtnCamara(activa) {
 }
 
 function controlarCamaraLocal() {
-    const videoTrackActual = miStream ? miStream.getVideoTracks()[0] : null;
-
-    // Apagar cámara si está activa y viva
-    if (videoTrackActual && videoTrackActual.enabled && videoTrackActual.readyState !== "ended") {
-        videoTrackActual.enabled = false;
+    // ── APAGAR: track existe, está vivo y activo ──
+    if (miVideoTrack && miVideoTrack.readyState === "live" && miVideoTrack.enabled) {
+        miVideoTrack.enabled = false;
+        const lv = document.getElementById("localVideo");
+        if (lv) lv.srcObject = null;
         actualizarBtnCamara(false);
         if (connData && connData.open) connData.send({ tipo: "camara_apagada" });
         return;
     }
 
-    // En cualquier otro caso: pedir un nuevo track de video fresco
+    // ── ENCENDER: pedir track nuevo siempre ──
     navigator.mediaDevices.getUserMedia({ video: true })
     .then(videoStream => {
-        const videoTrackNuevo = videoStream.getVideoTracks()[0];
+        const nuevoTrack = videoStream.getVideoTracks()[0];
 
-        // Quitar tracks de video anteriores (pueden estar en estado "ended")
-        if (miStream) {
-            miStream.getVideoTracks().forEach(t => { t.stop(); miStream.removeTrack(t); });
-            miStream.addTrack(videoTrackNuevo);
-        } else {
-            miStream = videoStream;
-        }
+        if (miVideoTrack) { miVideoTrack.stop(); }
+        miVideoTrack = nuevoTrack;
 
+        // Mostrar en video local con stream propio (no mezclar con la llamada)
         const lv = document.getElementById("localVideo");
-        lv.srcObject = miStream;
-        lv.style.transform = "scaleX(-1)";
+        if (lv) { lv.srcObject = videoStream; lv.style.transform = "scaleX(-1)"; }
 
         actualizarBtnCamara(true);
         document.getElementById("btnFijar").disabled = false;
 
+        // Inyectar en la llamada existente sin tocar el audio
         if (callVid && callVid.peerConnection) {
             try {
-                const pc = callVid.peerConnection;
-                const senders = pc.getSenders();
-                const senderVideo = senders.find(s => s.track && s.track.kind === "video");
-                if (senderVideo) {
-                    senderVideo.replaceTrack(videoTrackNuevo);
+                const senders = callVid.peerConnection.getSenders();
+                const sv = senders.find(s => s.track?.kind === "video");
+                if (sv) {
+                    sv.replaceTrack(nuevoTrack);
                 } else {
-                    pc.addTrack(videoTrackNuevo, miStream);
+                    callVid.peerConnection.addTrack(nuevoTrack, new MediaStream([nuevoTrack]));
                 }
                 if (connData && connData.open) connData.send({ tipo: "camara_encendida" });
                 return;
             } catch (e) {
-                console.warn("No se pudo inyectar track de video:", e);
+                console.warn("replaceTrack video falló, reconectando:", e);
                 callVid.close(); callVid = null;
             }
         }
 
-        callVid = peer.call(peerIdAnfitrion, miStream, { metadata: { nombre: miNombre } });
+        // Si no hay llamada activa: iniciar una nueva con los tracks disponibles
+        const tracks = [];
+        if (nuevoTrack) tracks.push(nuevoTrack);
+        if (miAudioTrack && miAudioTrack.readyState === "live") tracks.push(miAudioTrack);
+        const streamLlamada = new MediaStream(tracks);
+        callVid = peer.call(peerIdAnfitrion, streamLlamada, { metadata: { nombre: miNombre } });
         crearBox("anfitrion");
         callVid.on("stream", remoteStream => {
             ultimoStreamAnfitrion = remoteStream;
-            const videoHost = document.getElementById("video-anfitrion");
-            if (videoHost) { videoHost.srcObject = remoteStream; videoHost.play().catch(e => console.log(e)); }
+            const v = document.getElementById("video-anfitrion");
+            if (v) { v.srcObject = remoteStream; v.play().catch(()=>{}); }
         });
-        callVid.on("close", () => { const el = document.getElementById("box-anfitrion"); if (el) el.remove(); });
+        callVid.on("close", () => { document.getElementById("box-anfitrion")?.remove(); });
         if (connData && connData.open) connData.send({ tipo: "camara_encendida" });
     })
     .catch(err => { console.error(err); alert("No se pudo acceder a la cámara."); });
@@ -481,38 +469,46 @@ function actualizarBtnMic(activo) {
 }
 
 function alternarMicrofono() {
-    const audioTrackActual = miStream ? miStream.getAudioTracks()[0] : null;
-
-    // Si hay un track de audio vivo: simplemente activar/desactivar
-    if (audioTrackActual && audioTrackActual.readyState !== "ended") {
-        audioTrackActual.enabled = !audioTrackActual.enabled;
-        actualizarBtnMic(audioTrackActual.enabled);
+    // ── Si el track existe y está vivo: mute/unmute directo ──
+    if (miAudioTrack && miAudioTrack.readyState === "live") {
+        miAudioTrack.enabled = !miAudioTrack.enabled;
+        actualizarBtnMic(miAudioTrack.enabled);
         return;
     }
 
-    // Sin track de audio, o track terminado → pedir uno nuevo
+    // ── Sin track o track muerto: pedir uno nuevo ──
     navigator.mediaDevices.getUserMedia({ audio: true })
     .then(audioStream => {
-        const newTrack = audioStream.getAudioTracks()[0];
+        const nuevoTrack = audioStream.getAudioTracks()[0];
+        if (miAudioTrack) { miAudioTrack.stop(); }
+        miAudioTrack = nuevoTrack;
+        actualizarBtnMic(true);
 
-        if (miStream) {
-            // Limpiar tracks de audio viejos/terminados
-            miStream.getAudioTracks().forEach(t => { t.stop(); miStream.removeTrack(t); });
-            miStream.addTrack(newTrack);
-        } else {
-            miStream = audioStream;
-        }
-
-        // Enviar audio a la llamada existente
         if (callVid && callVid.peerConnection) {
             try {
                 const senders = callVid.peerConnection.getSenders();
                 const sa = senders.find(s => s.track?.kind === "audio");
-                if (sa) sa.replaceTrack(newTrack);
-                else callVid.peerConnection.addTrack(newTrack, miStream);
-            } catch(e) { console.warn(e); }
+                if (sa) {
+                    sa.replaceTrack(nuevoTrack);
+                } else {
+                    callVid.peerConnection.addTrack(nuevoTrack, new MediaStream([nuevoTrack]));
+                }
+                return;
+            } catch(e) { console.warn("replaceTrack audio falló:", e); }
         }
-        actualizarBtnMic(true);
+
+        // Sin llamada activa: iniciar con lo que hay
+        const tracks = [nuevoTrack];
+        if (miVideoTrack && miVideoTrack.readyState === "live") tracks.push(miVideoTrack);
+        const streamLlamada = new MediaStream(tracks);
+        callVid = peer.call(peerIdAnfitrion, streamLlamada, { metadata: { nombre: miNombre } });
+        crearBox("anfitrion");
+        callVid.on("stream", remoteStream => {
+            ultimoStreamAnfitrion = remoteStream;
+            const v = document.getElementById("video-anfitrion");
+            if (v) { v.srcObject = remoteStream; v.play().catch(()=>{}); }
+        });
+        callVid.on("close", () => { document.getElementById("box-anfitrion")?.remove(); });
     })
     .catch(err => { console.error(err); alert("Verifica permisos de micrófono."); });
 }
