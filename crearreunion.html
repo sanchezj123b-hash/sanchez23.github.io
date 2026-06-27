@@ -398,41 +398,43 @@ function actualizarBtnCamara(activa) {
 }
 
 function controlarCamara() {
-    // Apagar cámara si está activa
-    if (miStream && miStream.getVideoTracks()[0]?.enabled) {
-        miStream.getVideoTracks().forEach(t => t.enabled = false);
+    const videoTrackActual = miStream ? miStream.getVideoTracks()[0] : null;
+
+    // Apagar cámara si está activa y viva
+    if (videoTrackActual && videoTrackActual.enabled && videoTrackActual.readyState !== "ended") {
+        videoTrackActual.enabled = false;
         actualizarBtnCamara(false);
         enviarATodos({ tipo: "camara_apagada" });
         return;
     }
-    // Reactivar cámara si el track existe pero está pausado
-    if (miStream && miStream.getVideoTracks()[0] && !miStream.getVideoTracks()[0].enabled) {
-        miStream.getVideoTracks().forEach(t => t.enabled = true);
-        actualizarBtnCamara(true);
-        enviarATodos({ tipo: "camara_encendida" });
-        return;
-    }
-    // Primer encendido: pedir solo video (el mic ya puede estar activo independientemente)
+
+    // En cualquier otro caso (primer encendido, track pausado, o track terminado):
+    // pedir un nuevo track de video fresco
     navigator.mediaDevices.getUserMedia({ video: true })
     .then(videoStream => {
-        const videoTrack = videoStream.getVideoTracks()[0];
+        const videoTrackNuevo = videoStream.getVideoTracks()[0];
+
+        // Quitar tracks de video anteriores (pueden estar en estado "ended")
         if (miStream) {
-            // Ya hay stream de audio: agregar el track de video
-            miStream.addTrack(videoTrack);
+            miStream.getVideoTracks().forEach(t => { t.stop(); miStream.removeTrack(t); });
+            miStream.addTrack(videoTrackNuevo);
         } else {
             miStream = videoStream;
         }
+
         const lv = document.getElementById("localVideo");
-        lv.srcObject = miStream; lv.style.transform = "scaleX(-1)";
+        lv.srcObject = miStream;
+        lv.style.transform = "scaleX(-1)";
         actualizarBtnCamara(true);
 
+        // Enviar el nuevo track a todos los participantes conectados
         Object.values(conexiones).forEach(c => {
             if (!c.call) return;
             try {
                 const senders = c.call.peerConnection.getSenders();
                 const sv = senders.find(s => s.track?.kind === "video");
-                if (sv) sv.replaceTrack(videoTrack);
-                else c.call.peerConnection.addTrack(videoTrack, miStream);
+                if (sv) sv.replaceTrack(videoTrackNuevo);
+                else c.call.peerConnection.addTrack(videoTrackNuevo, miStream);
             } catch(e) { console.warn(e); }
         });
         enviarATodos({ tipo: "camara_encendida" });
@@ -456,35 +458,43 @@ function actualizarBtnMic(activo) {
 }
 
 function alternarMic() {
-    if (!miStream || !miStream.getAudioTracks()[0]) {
-        // Sin stream de audio aún → pedirlo de forma independiente
-        navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(audioStream => {
-            const audioTrack = audioStream.getAudioTracks()[0];
-            if (miStream) {
-                miStream.addTrack(audioTrack);
-            } else {
-                miStream = audioStream;
-            }
-            micActivo = true;
-            actualizarBtnMic(true);
-            // Enviar audio a conexiones existentes
-            Object.values(conexiones).forEach(c => {
-                if (!c.call) return;
-                try {
-                    const senders = c.call.peerConnection.getSenders();
-                    const sa = senders.find(s => s.track?.kind === "audio");
-                    if (sa) sa.replaceTrack(audioTrack);
-                    else c.call.peerConnection.addTrack(audioTrack, miStream);
-                } catch(e) { console.warn(e); }
-            });
-        })
-        .catch(err => { console.error(err); alert("Verifica permisos de micrófono."); });
+    const audioTrackActual = miStream ? miStream.getAudioTracks()[0] : null;
+
+    // Si hay un track de audio vivo: simplemente activar/desactivar
+    if (audioTrackActual && audioTrackActual.readyState !== "ended") {
+        micActivo = !micActivo;
+        audioTrackActual.enabled = micActivo;
+        actualizarBtnMic(micActivo);
         return;
     }
-    micActivo = !micActivo;
-    miStream.getAudioTracks().forEach(t => t.enabled = micActivo);
-    actualizarBtnMic(micActivo);
+
+    // Sin track de audio, o track terminado → pedir uno nuevo
+    navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(audioStream => {
+        const audioTrack = audioStream.getAudioTracks()[0];
+
+        if (miStream) {
+            // Limpiar tracks de audio viejos/terminados
+            miStream.getAudioTracks().forEach(t => { t.stop(); miStream.removeTrack(t); });
+            miStream.addTrack(audioTrack);
+        } else {
+            miStream = audioStream;
+        }
+        micActivo = true;
+        actualizarBtnMic(true);
+
+        // Enviar el nuevo track de audio a todos los participantes
+        Object.values(conexiones).forEach(c => {
+            if (!c.call) return;
+            try {
+                const senders = c.call.peerConnection.getSenders();
+                const sa = senders.find(s => s.track?.kind === "audio");
+                if (sa) sa.replaceTrack(audioTrack);
+                else c.call.peerConnection.addTrack(audioTrack, miStream);
+            } catch(e) { console.warn(e); }
+        });
+    })
+    .catch(err => { console.error(err); alert("Verifica permisos de micrófono."); });
 }
 
 // ── COMPARTIR LLAMADA ─────────────────────────────────────────
