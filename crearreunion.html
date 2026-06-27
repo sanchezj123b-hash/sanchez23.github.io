@@ -177,7 +177,9 @@ document.getElementById("lblNombreLocal").textContent = "Tú (Anfitrión) - " + 
 document.title = "Anfitrión - " + salaID;
 
 let peer        = null;
-let miStream    = null;
+let miStream    = null;   // MediaStream combinado que se envía por WebRTC
+let miVideoTrack = null;  // track de video activo
+let miAudioTrack = null;  // track de audio activo
 let streamPantalla = null;
 let callPantalla   = null;
 let conexiones  = {};
@@ -238,7 +240,12 @@ window.addEventListener("load", () => {
         }
 
         if (conexiones[nombre]?.admitido) {
-            call.answer(miStream || null);
+            // Construir stream de respuesta con los tracks activos en ese momento
+            const tracksRespuesta = [];
+            if (miVideoTrack && miVideoTrack.readyState === "live") tracksRespuesta.push(miVideoTrack);
+            if (miAudioTrack && miAudioTrack.readyState === "live") tracksRespuesta.push(miAudioTrack);
+            const streamRespuesta = tracksRespuesta.length > 0 ? new MediaStream(tracksRespuesta) : null;
+            call.answer(streamRespuesta);
             call.on("stream", (stream) => {
                 conexiones[nombre].ultimoStream = stream;
                 crearBox(nombre);
@@ -318,7 +325,11 @@ function admitirUsuario(nombre) {
     crearBox(nombre);
     if (conexiones[nombre].pendingCall) {
         const call = conexiones[nombre].pendingCall;
-        call.answer(miStream || null);
+        const tracksRespuesta = [];
+        if (miVideoTrack && miVideoTrack.readyState === "live") tracksRespuesta.push(miVideoTrack);
+        if (miAudioTrack && miAudioTrack.readyState === "live") tracksRespuesta.push(miAudioTrack);
+        const streamRespuesta = tracksRespuesta.length > 0 ? new MediaStream(tracksRespuesta) : null;
+        call.answer(streamRespuesta);
         call.on("stream", (stream) => {
             conexiones[nombre].ultimoStream = stream;
             const v = document.getElementById("video-" + nombre);
@@ -398,45 +409,47 @@ function actualizarBtnCamara(activa) {
 }
 
 function controlarCamara() {
-    const videoTrackActual = miStream ? miStream.getVideoTracks()[0] : null;
-
-    // Apagar cámara si está activa y viva
-    if (videoTrackActual && videoTrackActual.enabled && videoTrackActual.readyState !== "ended") {
-        videoTrackActual.enabled = false;
+    // ── APAGAR: el track existe, está vivo y activo ──
+    if (miVideoTrack && miVideoTrack.readyState === "live" && miVideoTrack.enabled) {
+        miVideoTrack.enabled = false;
+        // Silenciar el video local sin tocar el stream de la llamada
+        const lv = document.getElementById("localVideo");
+        if (lv) lv.srcObject = null;
         actualizarBtnCamara(false);
         enviarATodos({ tipo: "camara_apagada" });
         return;
     }
 
-    // En cualquier otro caso (primer encendido, track pausado, o track terminado):
-    // pedir un nuevo track de video fresco
+    // ── ENCENDER: pedir un track nuevo siempre (sea primera vez o reinicio) ──
     navigator.mediaDevices.getUserMedia({ video: true })
     .then(videoStream => {
-        const videoTrackNuevo = videoStream.getVideoTracks()[0];
+        const nuevoTrack = videoStream.getVideoTracks()[0];
 
-        // Quitar tracks de video anteriores (pueden estar en estado "ended")
-        if (miStream) {
-            miStream.getVideoTracks().forEach(t => { t.stop(); miStream.removeTrack(t); });
-            miStream.addTrack(videoTrackNuevo);
-        } else {
-            miStream = videoStream;
-        }
+        // Detener track anterior si existía
+        if (miVideoTrack) { miVideoTrack.stop(); }
+        miVideoTrack = nuevoTrack;
 
+        // Mostrar en el video local (stream separado, no afecta la llamada WebRTC)
         const lv = document.getElementById("localVideo");
-        lv.srcObject = miStream;
-        lv.style.transform = "scaleX(-1)";
-        actualizarBtnCamara(true);
+        if (lv) { lv.srcObject = videoStream; lv.style.transform = "scaleX(-1)"; }
 
-        // Enviar el nuevo track a todos los participantes conectados
+        // Inyectar/reemplazar en todas las conexiones activas
         Object.values(conexiones).forEach(c => {
             if (!c.call) return;
             try {
                 const senders = c.call.peerConnection.getSenders();
                 const sv = senders.find(s => s.track?.kind === "video");
-                if (sv) sv.replaceTrack(videoTrackNuevo);
-                else c.call.peerConnection.addTrack(videoTrackNuevo, miStream);
-            } catch(e) { console.warn(e); }
+                if (sv) {
+                    sv.replaceTrack(nuevoTrack);
+                } else {
+                    // Agregar sin tocar el audio: crear stream solo con este track
+                    const soloVideo = new MediaStream([nuevoTrack]);
+                    c.call.peerConnection.addTrack(nuevoTrack, soloVideo);
+                }
+            } catch(e) { console.warn("replaceTrack video:", e); }
         });
+
+        actualizarBtnCamara(true);
         enviarATodos({ tipo: "camara_encendida" });
     })
     .catch(err => { console.error(err); alert("Verifica permisos de cámara."); });
@@ -458,40 +471,36 @@ function actualizarBtnMic(activo) {
 }
 
 function alternarMic() {
-    const audioTrackActual = miStream ? miStream.getAudioTracks()[0] : null;
-
-    // Si hay un track de audio vivo: simplemente activar/desactivar
-    if (audioTrackActual && audioTrackActual.readyState !== "ended") {
+    // ── Si el track existe y está vivo: simplemente mute/unmute ──
+    if (miAudioTrack && miAudioTrack.readyState === "live") {
         micActivo = !micActivo;
-        audioTrackActual.enabled = micActivo;
+        miAudioTrack.enabled = micActivo;
         actualizarBtnMic(micActivo);
         return;
     }
 
-    // Sin track de audio, o track terminado → pedir uno nuevo
+    // ── Sin track de audio o track muerto: pedir uno nuevo ──
     navigator.mediaDevices.getUserMedia({ audio: true })
     .then(audioStream => {
-        const audioTrack = audioStream.getAudioTracks()[0];
-
-        if (miStream) {
-            // Limpiar tracks de audio viejos/terminados
-            miStream.getAudioTracks().forEach(t => { t.stop(); miStream.removeTrack(t); });
-            miStream.addTrack(audioTrack);
-        } else {
-            miStream = audioStream;
-        }
+        const nuevoTrack = audioStream.getAudioTracks()[0];
+        if (miAudioTrack) { miAudioTrack.stop(); }
+        miAudioTrack = nuevoTrack;
         micActivo = true;
         actualizarBtnMic(true);
 
-        // Enviar el nuevo track de audio a todos los participantes
+        // Inyectar en todas las conexiones activas
         Object.values(conexiones).forEach(c => {
             if (!c.call) return;
             try {
                 const senders = c.call.peerConnection.getSenders();
                 const sa = senders.find(s => s.track?.kind === "audio");
-                if (sa) sa.replaceTrack(audioTrack);
-                else c.call.peerConnection.addTrack(audioTrack, miStream);
-            } catch(e) { console.warn(e); }
+                if (sa) {
+                    sa.replaceTrack(nuevoTrack);
+                } else {
+                    const soloAudio = new MediaStream([nuevoTrack]);
+                    c.call.peerConnection.addTrack(nuevoTrack, soloAudio);
+                }
+            } catch(e) { console.warn("replaceTrack audio:", e); }
         });
     })
     .catch(err => { console.error(err); alert("Verifica permisos de micrófono."); });
