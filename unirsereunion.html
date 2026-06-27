@@ -183,9 +183,10 @@
         </div>
         <div class="seccion-videos">
             <div class="barra-controles">
-                <button id="btnCamara" class="btn-control" style="background:#28a745;" onclick="controlarCamaraLocal()">📹 Encender Cámara</button>
-                <button id="btnMic" class="btn-control" style="background:#6c757d;" onclick="alternarMicrofono()" >🎙️ Silenciar Mic</button>
+                <button id="btnCamara" class="btn-control" style="background:#6c757d;" onclick="controlarCamaraLocal()">📹 Cámara</button>
+                <button id="btnMic" class="btn-control" style="background:#6c757d;" onclick="alternarMicrofono()">🔇 Micrófono</button>
                 <button id="btnPantalla" class="btn-control" style="background:#6f42c1;" onclick="alternarPantalla()">🖥️ Compartir Pantalla</button>
+                <button id="btnCompartir" class="btn-control" style="background:#17a2b8;" onclick="compartirLlamada()">🔗 Compartir Llamada</button>
                 <button id="btnFijar" class="btn-control" style="background:#fd7e14;" onclick="fijarCamara()" disabled>📌 Fijar Cámara</button>
             </div>
             <div class="grid-videos" id="salaVideos">
@@ -385,113 +386,169 @@ function crearBox(nombre) {
 }
 
 // ── CÁMARA ────────────────────────────────────────────────────
+function actualizarBtnCamara(activa) {
+    const btn = document.getElementById("btnCamara");
+    if (activa) {
+        btn.innerText = "📹 Cámara (ON)";
+        btn.style.background = "#28a745";
+    } else {
+        btn.innerText = "📹 Cámara (OFF)";
+        btn.style.background = "#6c757d";
+    }
+}
+
 function controlarCamaraLocal() {
     const btn = document.getElementById("btnCamara");
 
-    // SI LA CÁMARA ESTÁ ACTIVA → PAUSARLA (sin destruir el stream ni la llamada)
-    if (miStream && miStream.getVideoTracks()[0] && miStream.getVideoTracks()[0].enabled === true) {
+    // Apagar cámara si está activa
+    if (miStream && miStream.getVideoTracks()[0]?.enabled === true) {
         miStream.getVideoTracks().forEach(track => track.enabled = false);
-
-        btn.innerText = "📹 Encender Cámara";
-        btn.style.background = "#28a745";
-
-        if (connData && connData.open) {
-            connData.send({ tipo: "camara_apagada" });
-        }
+        actualizarBtnCamara(false);
+        if (connData && connData.open) connData.send({ tipo: "camara_apagada" });
         return;
     }
 
-    // SI EL STREAM EXISTE PERO ESTABA PAUSADO → REACTIVARLO SIN NUEVA LLAMADA
+    // Reactivar si el track existe pero estaba pausado
     if (miStream && miStream.getVideoTracks()[0] && miStream.getVideoTracks()[0].enabled === false) {
         miStream.getVideoTracks().forEach(track => track.enabled = true);
-
-        btn.innerText = "📹 Apagar Cámara";
-        btn.style.background = "#dc3545";
-
-        if (connData && connData.open) {
-            connData.send({ tipo: "camara_encendida" });
-        }
+        actualizarBtnCamara(true);
+        if (connData && connData.open) connData.send({ tipo: "camara_encendida" });
         return;
     }
 
-    // PRIMER ENCENDIDO → pedir permisos y enviar video al anfitrión
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-    .then(stream => {
-        miStream = stream;
+    // Primer encendido: pedir solo video (no afectar audio existente)
+    navigator.mediaDevices.getUserMedia({ video: true })
+    .then(videoStream => {
+        const videoTrack = videoStream.getVideoTracks()[0];
+        if (miStream) {
+            miStream.addTrack(videoTrack);
+        } else {
+            miStream = videoStream;
+        }
 
         const lv = document.getElementById("localVideo");
-        lv.srcObject = stream;
+        lv.srcObject = miStream;
         lv.style.transform = "scaleX(-1)";
 
-        btn.innerText = "📹 Apagar Cámara";
-        btn.style.background = "#dc3545";
-
-        // Habilitar botones que dependen de tener stream activo
-        document.getElementById("btnMic").disabled = false;
+        actualizarBtnCamara(true);
         document.getElementById("btnFijar").disabled = false;
 
-        // Si ya hay una llamada WebRTC activa (creada con MediaStream vacío al ser admitido)
         if (callVid && callVid.peerConnection) {
             try {
                 const pc = callVid.peerConnection;
                 const senders = pc.getSenders();
-
-                // Buscar senders con track existente para reemplazar
                 const senderVideo = senders.find(s => s.track && s.track.kind === "video");
-                const senderAudio = senders.find(s => s.track && s.track.kind === "audio");
-
                 if (senderVideo) {
-                    senderVideo.replaceTrack(stream.getVideoTracks()[0]);
+                    senderVideo.replaceTrack(videoTrack);
                 } else {
-                    // No había track de video → agregar directamente
-                    pc.addTrack(stream.getVideoTracks()[0], stream);
+                    pc.addTrack(videoTrack, miStream);
                 }
-
-                if (senderAudio) {
-                    senderAudio.replaceTrack(stream.getAudioTracks()[0]);
-                } else {
-                    pc.addTrack(stream.getAudioTracks()[0], stream);
-                }
-
-                if (connData && connData.open) {
-                    connData.send({ tipo: "camara_encendida" });
-                }
+                if (connData && connData.open) connData.send({ tipo: "camara_encendida" });
                 return;
             } catch (e) {
-                console.warn("No se pudo inyectar tracks, rehaciendo llamada:", e);
-                callVid.close();
-                callVid = null;
+                console.warn("No se pudo inyectar track de video:", e);
+                callVid.close(); callVid = null;
             }
         }
 
-        // Sin llamada previa → crear una nueva desde cero
-        callVid = peer.call(peerIdAnfitrion, miStream, {
-            metadata: { nombre: miNombre }
-        });
-
-        // Asegurarse de que la caja del anfitrión existe
+        callVid = peer.call(peerIdAnfitrion, miStream, { metadata: { nombre: miNombre } });
         crearBox("anfitrion");
-
         callVid.on("stream", remoteStream => {
             ultimoStreamAnfitrion = remoteStream;
             const videoHost = document.getElementById("video-anfitrion");
-            if (videoHost) {
-                videoHost.srcObject = remoteStream;
-                videoHost.play().catch(e => console.log("Autoplay:", e));
-            }
+            if (videoHost) { videoHost.srcObject = remoteStream; videoHost.play().catch(e => console.log(e)); }
         });
-
-        callVid.on("close", () => {
-            const el = document.getElementById("box-anfitrion");
-            if (el) el.remove();
-        });
+        callVid.on("close", () => { const el = document.getElementById("box-anfitrion"); if (el) el.remove(); });
+        if (connData && connData.open) connData.send({ tipo: "camara_encendida" });
     })
-    .catch(err => {
-        console.error(err);
-        alert("No se pudo acceder a la cámara.");
-    });
+    .catch(err => { console.error(err); alert("No se pudo acceder a la cámara."); });
 }
-// ── CHAT ──────────────────────────────────────────────────────
+
+// ── MICRÓFONO ─────────────────────────────────────────────────
+function actualizarBtnMic(activo) {
+    const btn = document.getElementById("btnMic");
+    if (activo) {
+        btn.innerText = "🎙️ Micrófono (ON)";
+        btn.style.background = "#28a745";
+        const micIcon = document.querySelector("#box-local .mic-off-icono");
+        if (micIcon) micIcon.remove();
+    } else {
+        btn.innerText = "🔇 Micrófono (OFF)";
+        btn.style.background = "#dc3545";
+        const box = document.getElementById("box-local");
+        if (box && !box.querySelector(".mic-off-icono")) {
+            const icon = document.createElement("span");
+            icon.className = "mic-off-icono";
+            icon.innerText = "🔇";
+            box.appendChild(icon);
+        }
+    }
+}
+
+function alternarMicrofono() {
+    const audioTrack = miStream ? miStream.getAudioTracks()[0] : null;
+
+    if (!audioTrack) {
+        // Sin audio todavía → pedirlo de forma independiente
+        navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(audioStream => {
+            const newTrack = audioStream.getAudioTracks()[0];
+            if (miStream) {
+                miStream.addTrack(newTrack);
+            } else {
+                miStream = audioStream;
+            }
+            // Enviar audio a la llamada existente
+            if (callVid && callVid.peerConnection) {
+                try {
+                    const senders = callVid.peerConnection.getSenders();
+                    const sa = senders.find(s => s.track?.kind === "audio");
+                    if (sa) sa.replaceTrack(newTrack);
+                    else callVid.peerConnection.addTrack(newTrack, miStream);
+                } catch(e) { console.warn(e); }
+            }
+            actualizarBtnMic(true);
+        })
+        .catch(err => { console.error(err); alert("Verifica permisos de micrófono."); });
+        return;
+    }
+
+    audioTrack.enabled = !audioTrack.enabled;
+    actualizarBtnMic(audioTrack.enabled);
+}
+
+// ── COMPARTIR LLAMADA ─────────────────────────────────────────
+function compartirLlamada() {
+    const btn = document.getElementById("btnCompartir");
+    const url = window.location.origin + window.location.pathname.replace("unirsereunion.html", "index.html");
+    const texto = "ID de la reunión: " + salaID + "\nÚnete en: " + url;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto).then(() => {
+            const original = btn.innerText;
+            btn.innerText = "✅ ¡Copiado!";
+            btn.style.background = "#28a745";
+            setTimeout(() => { btn.innerText = "🔗 Compartir Llamada"; btn.style.background = "#17a2b8"; }, 2000);
+        }).catch(() => mostrarModalCompartir(texto));
+    } else {
+        mostrarModalCompartir(texto);
+    }
+}
+function mostrarModalCompartir(texto) {
+    const id = "modalCompartir";
+    if (document.getElementById(id)) return;
+    const overlay = document.createElement("div");
+    overlay.id = id;
+    overlay.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;";
+    const box = document.createElement("div");
+    box.style.cssText = "background:#2a2a2a;border:1px solid #555;border-radius:10px;padding:25px;max-width:420px;width:90%;text-align:center;";
+    box.innerHTML = `<h3 style="margin-top:0;color:#ffc107;">🔗 Compartir Reunión</h3>
+        <p style="color:#ccc;font-size:13px;">Comparte este ID con los participantes:</p>
+        <div style="background:#111;border:1px solid #444;border-radius:6px;padding:12px;margin:10px 0;font-size:15px;color:#ffc107;font-weight:bold;letter-spacing:1px;">${salaID}</div>
+        <textarea readonly style="width:100%;background:#111;color:#aaa;border:1px solid #444;border-radius:6px;padding:8px;font-size:12px;resize:none;box-sizing:border-box;" rows="3">${texto}</textarea>
+        <button onclick="document.getElementById('${id}').remove()" style="margin-top:12px;background:#dc3545;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-weight:bold;">Cerrar</button>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+}
 function enviarMensaje() {
     const txt = document.getElementById("txtMensaje");
     const texto = txt.value.trim();
@@ -588,56 +645,6 @@ function abandonarSala() {
     window.location.href = "index.html";
 }
 
-// ── MICRÓFONO ─────────────────────────────────────────────────
-function alternarMicrofono() {
-
-    const btn = document.getElementById("btnMic");
-
-    if (!miStream) {
-        navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(stream => {
-
-            if (!miStream) {
-                miStream = stream;
-            } else {
-                stream.getAudioTracks().forEach(track => {
-                    miStream.addTrack(track);
-                });
-            }
-
-            alternarMicrofono();
-        });
-        return;
-    }
-
-    const audioTrack = miStream.getAudioTracks()[0];
-
-    if (!audioTrack) return;
-
-    audioTrack.enabled = !audioTrack.enabled;
-
-    if (audioTrack.enabled) {
-        btn.innerText = "🎙️ Silenciar Mic";
-        btn.style.background = "#6c757d";
-
-        const micIcon = document.querySelector("#box-local .mic-off-icono");
-        if (micIcon) micIcon.remove();
-
-    } else {
-
-        btn.innerText = "🔇 Activar Mic";
-        btn.style.background = "#dc3545";
-
-        const box = document.getElementById("box-local");
-
-        if (box && !box.querySelector(".mic-off-icono")) {
-            const icon = document.createElement("span");
-            icon.className = "mic-off-icono";
-            icon.innerText = "🔇";
-            box.appendChild(icon);
-        }
-    }
-}
 // ── FIJAR CÁMARA ──────────────────────────────────────────────
 let camaraFijadaId = null;
 
