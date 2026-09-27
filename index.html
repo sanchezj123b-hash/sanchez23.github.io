@@ -1,145 +1,704 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <title>ZoomOf Workspace</title>
-    <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            margin: 0; 
-            padding: 0; 
-            background-color: #1a1a1a; 
-            color: #fff; 
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-            min-height: 100vh; 
-        }
-        .menu-inicio { 
-            text-align: center; 
-            background: #2a2a2a; 
-            padding: 40px; 
-            border-radius: 12px; 
-            box-shadow: 0 4px 15px rgba(0,0,0,0.4); 
-            max-width: 450px; 
-            width: 100%; 
-            box-sizing: border-box;
-        }
-        .menu-inicio h2 { margin-top: 0; font-size: 26px; color: #fff; }
-        .menu-inicio p { color: #aaa; font-size: 14px; margin-bottom: 25px; }
-        
-        .grid-botones-zoom { display: flex; gap: 15px; justify-content: center; margin-bottom: 20px; }
-        
-        .btn-zoom { 
-            flex: 1;
-            background-color: #2a2a2a; 
-            color: white; 
-            border: 2px solid #444; 
-            padding: 15px 10px; 
-            border-radius: 10px; 
-            cursor: pointer; 
-            font-weight: bold; 
-            font-size: 14px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 8px;
-            transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
-        }
-        .btn-zoom:hover { transform: translateY(-2px); border-color: #0e71eb; background-color: #333; }
-        .btn-nueva { border-color: #28a745; }
-        .btn-nueva:hover { border-color: #218838; background-color: #222; }
-        .btn-unirse { border-color: #0e71eb; }
-        .btn-unirse:hover { border-color: #0b5cb8; background-color: #222; }
-        
-        .icono-btn { font-size: 28px; }
-        
-        .form-unirse { margin-top: 20px; background: #222; padding: 20px; border-radius: 8px; border: 1px solid #444; text-align: left; }
-        .campo { margin-bottom: 15px; }
-        
-        input[type="text"] { 
-            width: 100%; 
-            padding: 10px; 
-            box-sizing: border-box; 
-            border: 1px solid #555; 
-            background: #333; 
-            color: white; 
-            border-radius: 6px; 
-            font-size: 14px;
-        }
-        input[type="text"]:focus { border-color: #0e71eb; outline: none; }
-        
-        .btn-entrar { 
-            background-color: #0e71eb; 
-            color: white; 
-            padding: 12px; 
-            border: none; 
-            width: 100%; 
-            font-weight: bold; 
-            border-radius: 6px; 
-            cursor: pointer; 
-            font-size: 14px; 
-            margin-top: 10px;
-            transition: background 0.2s, transform 0.1s;
-        }
-        .btn-entrar:hover { background-color: #0b5cb8; }
-        .btn-entrar:active { transform: scale(0.98); }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Portafolio personal de José Sánchez Sarmiento">
+  <title>José Sánchez | Portafolio</title>
+
+  <style>
+    :root{
+      --bg:#0b1020;
+      --bg2:#11182b;
+      --card:rgba(255,255,255,.06);
+      --text:#f4f7ff;
+      --muted:#aab4ca;
+      --primary:#6c63ff;
+      --secondary:#00d4ff;
+      --border:rgba(255,255,255,.10);
+      --max:1120px;
+    }
+
+    *{margin:0;padding:0;box-sizing:border-box;scroll-behavior:smooth}
+
+    body{
+      font-family:Arial, Helvetica, sans-serif;
+      background:
+        radial-gradient(circle at 10% 10%, rgba(108,99,255,.18), transparent 30%),
+        radial-gradient(circle at 90% 20%, rgba(0,212,255,.12), transparent 25%),
+        var(--bg);
+      color:var(--text);
+      line-height:1.6;
+    }
+
+    a{text-decoration:none;color:inherit}
+
+    .container{
+      width:min(92%,var(--max));
+      margin:auto;
+    }
+
+    header{
+      position:fixed;
+      top:0;
+      left:0;
+      width:100%;
+      z-index:1000;
+      backdrop-filter:blur(14px);
+      background:rgba(11,16,32,.75);
+      border-bottom:1px solid var(--border);
+    }
+
+    nav{
+      min-height:72px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+    }
+
+    .logo{
+      font-size:1.35rem;
+      font-weight:800;
+      letter-spacing:.5px;
+    }
+
+    .logo span{color:var(--secondary)}
+
+    .nav-links{
+      display:flex;
+      gap:26px;
+      list-style:none;
+    }
+
+    .nav-links a{
+      color:var(--muted);
+      font-size:.95rem;
+      transition:.3s;
+    }
+
+    .nav-links a:hover{color:white}
+
+    .menu{
+      display:none;
+      border:0;
+      background:none;
+      color:white;
+      font-size:1.7rem;
+      cursor:pointer;
+    }
+
+    section{padding:100px 0}
+
+    .hero{
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      padding-top:120px;
+    }
+
+    .hero-grid{
+      display:grid;
+      grid-template-columns:1.3fr .7fr;
+      gap:60px;
+      align-items:center;
+    }
+
+    .tag{
+      display:inline-block;
+      padding:8px 14px;
+      border:1px solid rgba(0,212,255,.3);
+      background:rgba(0,212,255,.07);
+      border-radius:50px;
+      color:var(--secondary);
+      font-size:.85rem;
+      margin-bottom:20px;
+    }
+
+    h1{
+      font-size:clamp(2.8rem,7vw,5.5rem);
+      line-height:1;
+      margin-bottom:22px;
+    }
+
+    h1 span{
+      background:linear-gradient(90deg,var(--primary),var(--secondary));
+      -webkit-background-clip:text;
+      color:transparent;
+    }
+
+    .hero p{
+      color:var(--muted);
+      max-width:650px;
+      font-size:1.08rem;
+      margin-bottom:30px;
+    }
+
+    .buttons{
+      display:flex;
+      gap:14px;
+      flex-wrap:wrap;
+    }
+
+    .btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:13px 22px;
+      border-radius:10px;
+      font-weight:700;
+      border:1px solid var(--border);
+      transition:.3s;
+    }
+
+    .btn-primary{
+      background:linear-gradient(90deg,var(--primary),#4f9cff);
+    }
+
+    .btn-secondary{background:var(--card)}
+
+    .btn:hover{
+      transform:translateY(-3px);
+      box-shadow:0 10px 30px rgba(0,0,0,.25);
+    }
+
+    .profile-card{
+      padding:30px;
+      border:1px solid var(--border);
+      background:var(--card);
+      border-radius:24px;
+      text-align:center;
+      box-shadow:0 25px 70px rgba(0,0,0,.25);
+    }
+
+    .avatar{
+      width:190px;
+      height:190px;
+      margin:0 auto 22px;
+      border-radius:50%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:4rem;
+      font-weight:800;
+      background:linear-gradient(135deg,var(--primary),var(--secondary));
+      border:6px solid rgba(255,255,255,.08);
+    }
+
+    .profile-card h3{margin-bottom:5px}
+    .profile-card p{color:var(--muted)}
+
+    .section-title{
+      margin-bottom:45px;
+    }
+
+    .section-title small{
+      color:var(--secondary);
+      text-transform:uppercase;
+      letter-spacing:2px;
+      font-weight:700;
+    }
+
+    .section-title h2{
+      font-size:2.4rem;
+      margin-top:8px;
+    }
+
+    .section-title p{
+      color:var(--muted);
+      max-width:650px;
+      margin-top:10px;
+    }
+
+    .about-grid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:25px;
+    }
+
+    .card{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:18px;
+      padding:28px;
+    }
+
+    .card h3{margin-bottom:12px}
+    .card p{color:var(--muted)}
+
+    .info{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:14px;
+      margin-top:20px;
+    }
+
+    .info div{
+      padding:15px;
+      background:rgba(255,255,255,.04);
+      border-radius:12px;
+    }
+
+    .info strong{
+      display:block;
+      font-size:.8rem;
+      color:var(--secondary);
+      margin-bottom:4px;
+    }
+
+    .skills{
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      gap:18px;
+    }
+
+    .skill{
+      padding:22px;
+      text-align:center;
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:16px;
+      transition:.3s;
+    }
+
+    .skill:hover{transform:translateY(-5px)}
+    .skill .icon{font-size:2rem;margin-bottom:10px}
+    .skill p{color:var(--muted);font-size:.9rem}
+
+    .projects{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:20px;
+    }
+
+    .project{
+      overflow:hidden;
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:18px;
+      transition:.3s;
+    }
+
+    .project:hover{transform:translateY(-6px)}
+
+    .project-top{
+      height:150px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:2.8rem;
+      background:linear-gradient(135deg,rgba(108,99,255,.35),rgba(0,212,255,.12));
+    }
+
+    .project-content{padding:22px}
+    .project-content h3{margin-bottom:8px}
+    .project-content p{color:var(--muted);font-size:.92rem;margin-bottom:15px}
+
+    .tags{
+      display:flex;
+      flex-wrap:wrap;
+      gap:7px;
+    }
+
+    .tags span{
+      font-size:.75rem;
+      padding:5px 9px;
+      border-radius:50px;
+      background:rgba(108,99,255,.13);
+      color:#c7c4ff;
+    }
+
+    .timeline{
+      position:relative;
+      max-width:850px;
+      margin:auto;
+    }
+
+    .timeline::before{
+      content:"";
+      position:absolute;
+      left:10px;
+      top:0;
+      width:2px;
+      height:100%;
+      background:linear-gradient(var(--primary),var(--secondary));
+    }
+
+    .timeline-item{
+      position:relative;
+      padding-left:42px;
+      margin-bottom:28px;
+    }
+
+    .timeline-item::before{
+      content:"";
+      position:absolute;
+      left:4px;
+      top:8px;
+      width:14px;
+      height:14px;
+      border-radius:50%;
+      background:var(--secondary);
+      box-shadow:0 0 15px var(--secondary);
+    }
+
+    .timeline-item span{
+      color:var(--secondary);
+      font-size:.85rem;
+      font-weight:700;
+    }
+
+    .timeline-item h3{margin:4px 0}
+    .timeline-item p{color:var(--muted)}
+
+    .contact{
+      text-align:center;
+      padding-bottom:80px;
+    }
+
+    .contact-box{
+      padding:50px 25px;
+      border:1px solid var(--border);
+      border-radius:24px;
+      background:
+        linear-gradient(135deg,rgba(108,99,255,.13),rgba(0,212,255,.06));
+    }
+
+    .contact-box p{
+      color:var(--muted);
+      max-width:600px;
+      margin:12px auto 25px;
+    }
+
+    footer{
+      border-top:1px solid var(--border);
+      padding:25px 0;
+      color:var(--muted);
+      text-align:center;
+      font-size:.85rem;
+    }
+
+    @media(max-width:850px){
+      .hero-grid,
+      .about-grid{grid-template-columns:1fr}
+
+      .skills{grid-template-columns:repeat(2,1fr)}
+      .projects{grid-template-columns:1fr}
+
+      .nav-links{
+        display:none;
+        position:absolute;
+        top:72px;
+        left:0;
+        width:100%;
+        flex-direction:column;
+        padding:20px;
+        background:#0b1020;
+        border-bottom:1px solid var(--border);
+      }
+
+      .nav-links.active{display:flex}
+      .menu{display:block}
+    }
+
+    @media(max-width:500px){
+      section{padding:75px 0}
+      .skills{grid-template-columns:1fr 1fr}
+      .info{grid-template-columns:1fr}
+      h1{font-size:3.2rem}
+      .avatar{width:150px;height:150px;font-size:3rem}
+    }
+  </style>
 </head>
+
 <body>
 
-    <div class="menu-inicio">
-        <h2>ZoomOf Workspace</h2>
-        <p>Elige una opción para ingresar a la plataforma de video</p>
-        
-        <div class="grid-botones-zoom">
-            <button class="btn-zoom btn-nueva" onclick="configurarForm('crear')">
-                <span class="icono-btn">📹</span>
-                <span>Nueva reunión</span>
-            </button>
-            <button class="btn-zoom btn-unirse" onclick="configurarForm('unirse')">
-                <span class="icono-btn">➕</span>
-                <span>Unirse</span>
-            </button>
-        </div>
+<header>
+  <div class="container">
+    <nav>
+      <a href="#inicio" class="logo">José<span>.</span></a>
 
-        <div id="seccionCampos" class="form-unirse" style="display: none;">
-            <div class="campo">
-                <input type="text" id="inputNombre" placeholder="Tu Nombre / Apodo...">
-            </div>
-            <div class="campo" id="capasaSalaID" style="display:none;">
-                <input type="text" id="inputSalaID" placeholder="ID de la reunión (Ej: sala-xxxx)...">
-            </div>
-            <button class="btn-entrar" onclick="procesarEnvio()">Ingresar de forma segura</button>
+      <button class="menu" id="menu">☰</button>
+
+      <ul class="nav-links" id="navLinks">
+        <li><a href="#inicio">Inicio</a></li>
+        <li><a href="#sobre-mi">Sobre mí</a></li>
+        <li><a href="#habilidades">Habilidades</a></li>
+        <li><a href="#proyectos">Proyectos</a></li>
+        <li><a href="#formacion">Formación</a></li>
+        <li><a href="#contacto">Contacto</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <section class="hero" id="inicio">
+    <div class="container hero-grid">
+
+      <div>
+        <div class="tag">Disponible para oportunidades</div>
+
+        <h1>Hola, soy<br><span>José Sánchez</span></h1>
+
+        <p>
+          Estudiante de Ingeniería de Sistemas interesado en el desarrollo
+          de software, bases de datos, tecnología y creación de soluciones digitales.
+        </p>
+
+        <div class="buttons">
+          <a href="#proyectos" class="btn btn-primary">Ver mis proyectos</a>
+          <a href="#contacto" class="btn btn-secondary">Contactarme</a>
         </div>
+      </div>
+
+      <div class="profile-card">
+        <div class="avatar">JS</div>
+        <h3>José Sánchez Sarmiento</h3>
+        <p>Estudiante de Ingeniería de Sistemas</p>
+      </div>
+
     </div>
+  </section>
 
-    <script>
-        var modoSeleccionado = "";
+  <section id="sobre-mi">
+    <div class="container">
 
-        function configurarForm(accion) {
-            modoSeleccionado = accion;
-            document.getElementById("seccionCampos").style.display = "block";
-            document.getElementById("capasaSalaID").style.display = accion === "unirse" ? "block" : "none";
-            document.getElementById("inputNombre").focus();
-        }
+      <div class="section-title">
+        <small>01 — Sobre mí</small>
+        <h2>Conoce un poco de mí</h2>
+      </div>
 
-        function procesarEnvio() {
-            var nombre = document.getElementById("inputNombre").value.trim();
-            if (nombre === "") { alert("Por favor, introduce tu nombre."); return; }
-            var nombreLimpio = encodeURIComponent(nombre);
+      <div class="about-grid">
 
-            if (modoSeleccionado === "crear") {
-                var timestamp = new Date().getTime().toString().substring(8);
-                var randomNum = Math.floor(1000 + Math.random() * 9000);
-                var codigoUnico = "sala-" + timestamp + randomNum;
-                window.location.replace("crearreunion.html?id=" + codigoUnico + "&nombre=" + nombreLimpio);
-            } else {
-                var salaID = document.getElementById("inputsalaID") ? document.getElementById("inputsalaID").value.trim() : document.getElementById("inputSalaID").value.trim();
-                if (salaID === "") { alert("Debes colocar el ID de la reunión."); return; }
-                window.location.replace("unirsereunion.html?id=" + encodeURIComponent(salaID) + "&nombre=" + nombreLimpio);
-            }
-        }
-    </script>
+        <div class="card">
+          <h3>Mi perfil</h3>
+          <p>
+            Soy estudiante de Ingeniería de Sistemas. Me interesa aprender
+            nuevas tecnologías y desarrollar proyectos que me permitan
+            mejorar mis conocimientos en programación y sistemas.
+          </p>
+
+          <div class="info">
+            <div>
+              <strong>Especialidad</strong>
+              Ingeniería de Sistemas
+            </div>
+            <div>
+              <strong>Universidad</strong>
+              Universidad Autónoma del Perú
+            </div>
+            <div>
+              <strong>Área de interés</strong>
+              Desarrollo de software
+            </div>
+            <div>
+              <strong>Perfil</strong>
+              Estudiante
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Objetivo profesional</h3>
+          <p>
+            Seguir desarrollando mis habilidades en tecnología y programación,
+            adquirir experiencia profesional y participar en proyectos donde
+            pueda aplicar lo aprendido durante mi formación universitaria.
+          </p>
+          <br>
+          <p>
+            Me interesa especialmente el desarrollo de aplicaciones,
+            bases de datos y soluciones orientadas a sistemas.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section id="habilidades">
+    <div class="container">
+
+      <div class="section-title">
+        <small>02 — Habilidades</small>
+        <h2>Lo que estoy aprendiendo</h2>
+      </div>
+
+      <div class="skills">
+
+        <div class="skill">
+          <div class="icon">☕</div>
+          <h3>Java</h3>
+          <p>POO, Swing, MVC y desarrollo de aplicaciones.</p>
+        </div>
+
+        <div class="skill">
+          <div class="icon">🗄️</div>
+          <h3>MySQL</h3>
+          <p>Diseño de bases de datos, consultas y CRUD.</p>
+        </div>
+
+        <div class="skill">
+          <div class="icon">🌐</div>
+          <h3>Web</h3>
+          <p>HTML, CSS, JavaScript y desarrollo web.</p>
+        </div>
+
+        <div class="skill">
+          <div class="icon">🔧</div>
+          <h3>Herramientas</h3>
+          <p>NetBeans, Git, Packet Tracer y herramientas de desarrollo.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section id="proyectos">
+    <div class="container">
+
+      <div class="section-title">
+        <small>03 — Proyectos</small>
+        <h2>Algunos de mis proyectos</h2>
+        <p>Proyectos académicos y personales realizados durante mi formación.</p>
+      </div>
+
+      <div class="projects">
+
+        <article class="project">
+          <div class="project-top">🍽️</div>
+          <div class="project-content">
+            <h3>La Esquina Gourmet</h3>
+            <p>
+              Sistema para la gestión de clientes, productos, mesas,
+              órdenes y detalles de pedidos.
+            </p>
+            <div class="tags">
+              <span>Java</span>
+              <span>MySQL</span>
+              <span>POO</span>
+              <span>DAO</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="project">
+          <div class="project-top">💻</div>
+          <div class="project-content">
+            <h3>ZoomOf</h3>
+            <p>
+              Proyecto web orientado a comunicación mediante navegador
+              y funcionalidades de cámara y micrófono.
+            </p>
+            <div class="tags">
+              <span>HTML</span>
+              <span>CSS</span>
+              <span>JavaScript</span>
+              <span>WebRTC</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="project">
+          <div class="project-top">🌐</div>
+          <div class="project-content">
+            <h3>Redes con Packet Tracer</h3>
+            <p>
+              Diseño y configuración de topologías de red utilizando
+              routers, switches y diferentes protocolos de enrutamiento.
+            </p>
+            <div class="tags">
+              <span>Cisco</span>
+              <span>OSPF</span>
+              <span>RIP</span>
+              <span>Networking</span>
+            </div>
+          </div>
+        </article>
+
+      </div>
+    </div>
+  </section>
+
+  <section id="formacion">
+    <div class="container">
+
+      <div class="section-title">
+        <small>04 — Formación</small>
+        <h2>Mi trayectoria académica</h2>
+      </div>
+
+      <div class="timeline">
+
+        <div class="timeline-item">
+          <span>2024 — Actualidad</span>
+          <h3>Ingeniería de Sistemas</h3>
+          <p>Universidad Autónoma del Perú</p>
+        </div>
+
+        <div class="timeline-item">
+          <span>Actualidad</span>
+          <h3>Desarrollo de proyectos académicos</h3>
+          <p>
+            Desarrollo de aplicaciones, bases de datos, redes y proyectos
+            relacionados con tecnología.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section class="contact" id="contacto">
+    <div class="container">
+
+      <div class="contact-box">
+        <div class="section-title">
+          <small>05 — Contacto</small>
+          <h2>¿Trabajamos juntos?</h2>
+          <p>
+            Estoy interesado en oportunidades que me permitan seguir
+            aprendiendo y desarrollándome en el área de sistemas.
+          </p>
+        </div>
+
+        <div class="buttons" style="justify-content:center">
+          <a class="btn btn-primary" href="mailto:tu-correo@gmail.com">
+            Enviarme un correo
+          </a>
+
+          <a class="btn btn-secondary" href="#" onclick="window.print()">
+            Descargar / Imprimir CV
+          </a>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="container">
+    © 2026 José Sánchez Sarmiento — Portafolio Personal
+  </div>
+</footer>
+
+<script>
+  const menu = document.getElementById("menu");
+  const navLinks = document.getElementById("navLinks");
+
+  menu.addEventListener("click", () => {
+    navLinks.classList.toggle("active");
+  });
+
+  document.querySelectorAll(".nav-links a").forEach(link => {
+    link.addEventListener("click", () => {
+      navLinks.classList.remove("active");
+    });
+  });
+</script>
+
 </body>
 </html>
